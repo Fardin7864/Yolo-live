@@ -127,7 +127,7 @@ export default function ProfileScreen() {
   };
   const visitors = user.visitorCount ?? user.visitors ?? 0;
   const resellerActive = !!myReseller?.id;
-  const activeAvatarFrame = user.selectedProfileFrameUrl
+  const activeAvatarFrame = user.selectedProfileFrameUrl && !user.selectedProfileFrameUrl.startsWith('bundled://')
     ? { uri: user.selectedProfileFrameUrl }
     : PURCHASED_PROFILE_FRAMES[user.selectedProfileFrame] || PROFILE_ASSETS.avatarFrame;
 

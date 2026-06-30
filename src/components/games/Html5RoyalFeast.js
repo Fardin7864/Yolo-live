@@ -187,7 +187,7 @@ export default function Html5RoyalFeast({ roomId, myDiamonds, setMyDiamonds, onB
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, minHeight: 620, backgroundColor: '#0C0830', overflow: 'hidden', borderRadius: 20 },
+  container: { flex: 1, minHeight: 0, backgroundColor: '#0C0830', overflow: 'hidden', borderRadius: 20 },
   webview: { flex: 1, backgroundColor: '#0C0830' },
   header: { height: 46, paddingHorizontal: 8, backgroundColor: '#160B3E', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   headerTitle: { color: '#FFF3CF', fontWeight: '900', fontSize: 16 },

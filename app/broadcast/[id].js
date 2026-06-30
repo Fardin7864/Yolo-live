@@ -3378,10 +3378,16 @@ export default function BroadcastRoomScreen() {
     // Compact 2-column tile grid for the picker; the game body itself
     // takes 'auto' height so it sizes to its own content.
     const menuHeight = Math.min(620, Math.round(height * 0.72));
+    const royalFeastHeight = Math.min(760, height - insets.top - 12);
+    const gameSheetHeight = gameMenuState === 'menu'
+      ? menuHeight
+      : gameMenuState === 'royalfeast'
+        ? royalFeastHeight
+        : 'auto';
     return (
       <Modal animationType="slide" transparent={true} visible={gameMenuState !== null} onRequestClose={() => setGameMenuState(null)}>
         <View style={styles.giftModalOverlay}>
-          <View style={[styles.giftModalContent, { paddingBottom: insets.bottom + 20, height: gameMenuState === 'menu' ? menuHeight : 'auto' }]}>
+          <View style={[styles.giftModalContent, { paddingBottom: insets.bottom + 20, height: gameSheetHeight }]}>
 
             {gameMenuState === 'menu' && (
               <View style={{ flex: 1 }}>

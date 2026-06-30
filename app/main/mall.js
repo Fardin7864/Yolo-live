@@ -39,7 +39,13 @@ const FRAME_ITEMS = [
   { id: 'royal-gold', name: 'Royal Gold', price: 0, image: require('../../assets/mall/frames/royal-gold.webp') },
 ];
 
-const frameSource = (item) => item?.frame_url ? { uri: item.frame_url } : item?.image;
+const BUNDLED_FRAME_ASSETS = Object.fromEntries(FRAME_ITEMS.map((item) => [item.id, item.image]));
+const frameSource = (item) => {
+  if (item?.frame_url?.startsWith('bundled://')) {
+    return BUNDLED_FRAME_ASSETS[item.id];
+  }
+  return item?.frame_url ? { uri: item.frame_url } : item?.image;
+};
 
 const CATALOG = [
   { id: 'phoenix-wings', name: 'Phoenix Wings', category: 'Dress Up', price: 300000, icon: 'flame', colors: ['#FF7A16', '#D3154F'], duration: '7d' },
