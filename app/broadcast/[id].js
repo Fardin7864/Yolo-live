@@ -228,7 +228,7 @@ export default function BroadcastRoomScreen() {
   const [isSeatsLocked, setIsSeatsLocked] = useState(false);
   const [lockedSeats, setLockedSeats] = useState([]); // per-seat lock (seat indices 0-6)
   const [showManageCalls, setShowManageCalls] = useState(false);
-  const [pinnedMessage, setPinnedMessage] = useState("Welcome to Yolo Live! 🔥 Please follow the community rules and have fun!");
+  const [pinnedMessage, setPinnedMessage] = useState("Welcome to Care Live! 🔥 Please follow the community rules and have fun!");
   const [mutedGuests, setMutedGuests] = useState([]); // Array of guest IDs
   const [blockedUsers, setBlockedUsers] = useState([]); // Array of blocked IDs
   const [roomAdmins, setRoomAdmins] = useState([]); // Array of admin IDs

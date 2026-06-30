@@ -255,7 +255,7 @@ export default function LiveSetupScreen() {
   const handleShare = async () => {
     try {
       await Share.share({
-        message: `Join my awesome ${broadcastType} on Yolo-Live! Download the app now.`,
+        message: `Join my awesome ${broadcastType} on Care Live! Download the app now.`,
       });
     } catch (error) {
       showCuteAlert("Error", error.message);

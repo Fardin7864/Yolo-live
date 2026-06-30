@@ -28,7 +28,7 @@ export const GlobalStateProvider = ({ children }) => {
     live_enabled: true,
     gifting_enabled: true,
     games_enabled: true,
-    platform_name: 'YOLO LIVE',
+    platform_name: 'Care Live',
   });
 
   // Per-game admin toggles (driven by `game_settings` table). Defaults

@@ -24,6 +24,7 @@ const SECTION_ICONS = {
 const ACTION_ICONS = {
   network: require('../../../assets/home/icons/network.png'),
   vip: require('../../../assets/home/icons/vip.png'),
+  svip: require('../../../assets/home/icons/svip.png'),
   tasks: require('../../../assets/home/icons/tasks.png'),
 };
 const EMPTY_BACKGROUNDS = {
@@ -54,6 +55,7 @@ const QUICK_ACTIONS = [
   { key: 'tasks', title: 'Tasks', subtitle: 'Complete & earn', meta: '🪙 120', colors: ['#5C1BC6', '#B914D1', '#F00CB8'], glow: '#FF55E6', route: '/main/tasks' },
   { key: 'vip', title: 'VIP', subtitle: 'Exclusive perks', meta: 'VIP 3', colors: ['#7C283E', '#B55527', '#E18A19'], glow: '#FFB53D', route: '/main/vip' },
   { key: 'network', title: 'Network', subtitle: 'Grow your circle', meta: '+ New people', colors: ['#1645A8', '#0079AE', '#00A7A4'], glow: '#35E7FF', route: '/main/network' },
+  { key: 'svip', title: 'SVIP', subtitle: 'Super privileges', meta: 'SVIP', colors: ['#4D1D95', '#8B2AE6', '#D97706'], glow: '#FCD34D', route: '/main/vip' },
 ];
 
 const formatCount = (value) => {
@@ -552,7 +554,7 @@ const styles = StyleSheet.create({
   categoryText: { color: '#DAD8F7', fontSize: 14, fontWeight: '600' },
   categoryTextActive: { color: '#FFF', fontWeight: '800' },
   heroShell: { marginTop: 11, marginHorizontal: 16, borderRadius: 23, overflow: 'hidden', borderWidth: 1.2, borderColor: '#8739FF' },
-  heroCard: { height: 224 },
+  heroCard: { height: 142 },
   carouselImage: { width: '100%', height: '100%', backgroundColor: '#0A083A' },
   secondaryCarousel: { marginTop: 24, borderRadius: 19, borderColor: 'rgba(111,87,255,.72)' },
   secondarySlide: { height: 142 },
@@ -572,23 +574,31 @@ const styles = StyleSheet.create({
   heroDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: 'rgba(255,255,255,.4)' },
   heroDotActive: { width: 18, backgroundColor: '#FFF' },
   slideCount: { position: 'absolute', right: 16, bottom: 10, color: '#FFF', fontWeight: '800', fontSize: 12 },
-  quickRow: { height: 102, flexDirection: 'row', alignItems: 'stretch', paddingHorizontal: 14, gap: 8, marginTop: 15 },
-  quickTouch: { flex: 1, height: 102, borderRadius: 21 },
+  quickRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    alignItems: 'stretch',
+    paddingHorizontal: 12,
+    rowGap: 8,
+    marginTop: 10,
+  },
+  quickTouch: { width: '48.7%', height: 88, borderRadius: 19 },
   quickCard: {
-    height: 102, borderRadius: 21, paddingHorizontal: 7, paddingVertical: 10,
-    borderWidth: 1.2, overflow: 'hidden', flexDirection: 'row', alignItems: 'center', gap: 6,
+    height: 88, borderRadius: 19, paddingHorizontal: 8, paddingVertical: 7,
+    borderWidth: 1.2, overflow: 'hidden', flexDirection: 'row', alignItems: 'center', gap: 8,
     shadowOpacity: .42, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 7,
   },
   quickGlow: { position: 'absolute', width: 82, height: 82, borderRadius: 41, left: -24, top: -24 },
   quickIconShell: {
-    width: 44, height: 50, borderRadius: 14, alignItems: 'center', justifyContent: 'center',
+    width: 50, height: 52, borderRadius: 15, alignItems: 'center', justifyContent: 'center',
     backgroundColor: 'rgba(19,10,67,.30)', borderWidth: 1,
   },
-  quickAsset: { width: 43, height: 52 },
+  quickAsset: { width: 48, height: 54 },
   quickCopy: { flex: 1, minWidth: 0 },
-  quickTitle: { color: '#FFF', fontSize: 13, fontWeight: '900', textShadowColor: 'rgba(18,5,54,.55)', textShadowRadius: 4 },
-  quickSubtitle: { color: '#F3EFFF', fontSize: 9.5, marginTop: 3 },
-  quickMeta: { color: '#FFE34F', fontSize: 10.5, fontWeight: '900', marginTop: 5 },
+  quickTitle: { color: '#FFF', fontSize: 16, fontWeight: '900', textShadowColor: 'rgba(18,5,54,.55)', textShadowRadius: 4 },
+  quickSubtitle: { color: '#F3EFFF', fontSize: 12, marginTop: 4 },
+  quickMeta: { color: '#FFE34F', fontSize: 13, fontWeight: '900', marginTop: 6 },
   quickMetaGreen: { color: '#46FFAE' },
   sectionHeader: { marginTop: 23, marginBottom: 10, paddingHorizontal: 17, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   sectionTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },

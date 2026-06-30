@@ -27,7 +27,7 @@ const TENANT_CONFIG = {
   shortName: 'Care Live',                  // Short version used in tight UI
   bundleId:  'com.carelive.app',           // Android applicationId / iOS bundle id — MUST be globally unique on the store
   scheme:    'care-live',                  // Deep-link scheme (care-live://path)
-  slug:      'Yolo-live',                  // Expo project slug — kept so the existing EAS project (id below) + Android keystore are reused. Display name comes from `appName`, not slug.
+  slug:      'care-live',                  // Expo project slug — must match the linked EAS project. Display name comes from `appName`.
   owner:     'yoloteam',                   // EAS organisation/team account
 
   // ============================================================
@@ -79,8 +79,8 @@ const TENANT_CONFIG = {
   },
 
   eas: {
-    projectId: 'dc58651e-3bc8-460a-b4c4-c7837b8cf958',
-    updateUrl: 'https://u.expo.dev/dc58651e-3bc8-460a-b4c4-c7837b8cf958',
+    projectId: '5eb8efa6-3b5d-4fb2-9ab0-5ec60e95ce25',
+    updateUrl: 'https://u.expo.dev/5eb8efa6-3b5d-4fb2-9ab0-5ec60e95ce25',
   },
 
   // ============================================================

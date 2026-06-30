@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert, Animated, Image, ImageBackground, Modal, RefreshControl, ScrollView, StyleSheet,
   Text, TouchableOpacity, View, useWindowDimensions,
@@ -16,22 +16,35 @@ const BANNER = require('../../assets/mall/unique-props-banner.png');
 
 const CATEGORIES = ['Intro', 'Frame', 'Dress Up', 'Room Frame', 'Business Card'];
 
-const INTRO_ITEMS = [
+const BUNDLED_INTRO_ASSETS = {
+  'football-cup.webp': require('../../assets/mall/intro/football-cup.webp'),
+  'football-cup.m4v': require('../../assets/mall/intro/football-cup.m4v'),
+  'blue-roses.webp': require('../../assets/mall/intro/blue-roses.webp'),
+  'blue-roses.m4v': require('../../assets/mall/intro/blue-roses.m4v'),
+};
+
+const FALLBACK_INTRO_ITEMS = [
   {
     id: 'football-cup',
     name: 'Football Champions Cup',
-    price: 90000,
-    thumbnail: require('../../assets/mall/intro/football-cup.webp'),
-    video: require('../../assets/mall/intro/football-cup.m4v'),
+    diamond_cost: 90000,
+    thumbnail_url: 'bundled://football-cup.webp',
+    video_url: 'bundled://football-cup.m4v',
   },
   {
     id: 'blue-roses',
     name: 'Blue Rose Bouquet',
-    price: 75000,
-    thumbnail: require('../../assets/mall/intro/blue-roses.webp'),
-    video: require('../../assets/mall/intro/blue-roses.m4v'),
+    diamond_cost: 75000,
+    thumbnail_url: 'bundled://blue-roses.webp',
+    video_url: 'bundled://blue-roses.m4v',
   },
 ];
+
+const mediaSource = (url) => {
+  if (typeof url === 'number') return url;
+  if (url?.startsWith?.('bundled://')) return BUNDLED_INTRO_ASSETS[url.replace('bundled://', '')];
+  return url ? { uri: url } : null;
+};
 
 const FRAME_ITEMS = [
   { id: 'heart-fantasy', name: 'Heart Fantasy', price: 0, image: require('../../assets/mall/frames/heart-fantasy.webp') },
@@ -117,7 +130,7 @@ function IntroCard({ item, width, selected, onPress }) {
       style={[styles.introCard, { width }, selected && styles.introCardSelected]}
       onPress={onPress}
     >
-      <Image source={item.thumbnail} style={styles.introThumbnail} />
+      <Image source={mediaSource(item.thumbnail_url) || item.thumbnail} style={styles.introThumbnail} />
       <LinearGradient colors={['transparent', 'rgba(5,6,28,.96)']} style={styles.introShade} />
       <View style={styles.previewPill}>
         <Ionicons name="play" size={12} color="#FFFFFF" />
@@ -164,14 +177,14 @@ function FrameCard({ item, width, user, selected, onPress }) {
       <Text style={styles.frameName} numberOfLines={1}>{item.name}</Text>
       <View style={styles.introPriceRow}>
         <Ionicons name="diamond" size={12} color="#72A9FF" />
-        <Text style={styles.introPrice}>{formatNumber(item.price)}</Text>
+        <Text style={styles.introPrice}>{formatNumber(item.diamond_cost ?? item.price)}</Text>
       </View>
     </TouchableOpacity>
   );
 }
 
 function AnimationPreview({ item, onClose }) {
-  const player = useVideoPlayer(item.video, (instance) => {
+  const player = useVideoPlayer(mediaSource(item.video_url) || item.video, (instance) => {
     instance.loop = false;
     instance.play();
   });
@@ -265,37 +278,81 @@ export default function MallScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [selectedIntro, setSelectedIntro] = useState(null);
   const [previewIntro, setPreviewIntro] = useState(null);
+  const [availableIntros, setAvailableIntros] = useState(FALLBACK_INTRO_ITEMS);
   const [selectedFrame, setSelectedFrame] = useState(FRAME_ITEMS[0]);
   const [availableFrames, setAvailableFrames] = useState(FRAME_ITEMS);
   const [buyingFrame, setBuyingFrame] = useState(false);
+  const refreshUserRef = useRef(refreshUser);
 
   useEffect(() => {
     setMode(params.tab === 'props' ? 'props' : 'mall');
   }, [params.tab]);
 
   useEffect(() => {
-    const activeFrame = FRAME_ITEMS.find((item) => item.id === user?.selectedProfileFrame);
-    if (activeFrame) setSelectedFrame(activeFrame);
-  }, [user?.selectedProfileFrame]);
+    refreshUserRef.current = refreshUser;
+  }, [refreshUser]);
+
+  const loadIntros = useCallback(async () => {
+    const { data, error } = await supabase.from('mall_intro_items').select('*')
+      .eq('is_active', true).order('display_order').order('created_at');
+    if (!error && Array.isArray(data)) {
+      const nextIntros = data.length ? data : FALLBACK_INTRO_ITEMS;
+      setAvailableIntros(nextIntros);
+      setSelectedIntro((current) => current ? (nextIntros.find((item) => item.id === current.id) || null) : current);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadIntros();
+    const channel = supabase.channel(`mall-intros-${Date.now()}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'mall_intro_items' }, loadIntros)
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') loadIntros();
+      });
+    return () => { supabase.removeChannel(channel); };
+  }, [loadIntros]);
+
+  useEffect(() => {
+    if (mode !== 'mall' || category !== 'Intro') return undefined;
+    const timer = setInterval(loadIntros, 2500);
+    return () => clearInterval(timer);
+  }, [category, loadIntros, mode]);
 
   const loadFrames = useCallback(async () => {
     const { data, error } = await supabase.from('profile_frames').select('*')
       .eq('is_active', true).order('display_order').order('created_at');
-    if (!error && Array.isArray(data) && data.length) {
-      setAvailableFrames(data);
-      const active = data.find((item) => item.id === user?.selectedProfileFrame);
+    if (!error && Array.isArray(data)) {
+      const nextFrames = data.length ? data : FRAME_ITEMS;
+      setAvailableFrames(nextFrames);
+      const active = nextFrames.find((item) => item.id === user?.selectedProfileFrame);
       if (active) setSelectedFrame(active);
-      else setSelectedFrame((current) => data.find((item) => item.id === current?.id) || data[0]);
+      else setSelectedFrame((current) => nextFrames.find((item) => item.id === current?.id) || nextFrames[0]);
     }
   }, [user?.selectedProfileFrame]);
 
   useEffect(() => {
+    const activeFrame = availableFrames.find((item) => item.id === user?.selectedProfileFrame);
+    if (activeFrame) setSelectedFrame(activeFrame);
+  }, [availableFrames, user?.selectedProfileFrame]);
+
+  useEffect(() => {
     loadFrames();
     const channel = supabase.channel(`mall-profile-frames-${Date.now()}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'profile_frames' }, loadFrames)
-      .subscribe();
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'profile_frames' }, () => {
+        loadFrames();
+        refreshUserRef.current?.();
+      })
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') loadFrames();
+      });
     return () => { supabase.removeChannel(channel); };
   }, [loadFrames]);
+
+  useEffect(() => {
+    if (mode !== 'mall' || category !== 'Frame') return undefined;
+    const timer = setInterval(loadFrames, 2500);
+    return () => clearInterval(timer);
+  }, [category, loadFrames, mode]);
 
   const loadProps = useCallback(async (refresh = false) => {
     if (refresh) setRefreshing(true);
@@ -433,7 +490,7 @@ export default function MallScreen() {
                 </TouchableOpacity>
               </View>
               <View style={styles.grid}>
-                {category === 'Intro' ? INTRO_ITEMS.map((item) => (
+                {category === 'Intro' ? availableIntros.map((item) => (
                   <IntroCard
                     key={item.id}
                     item={item}
@@ -502,7 +559,7 @@ export default function MallScreen() {
         {mode === 'mall' && category === 'Intro' && selectedIntro ? (
           <IntroActions
             item={selectedIntro}
-            onBuy={() => Alert.alert('Buy Prop', `${selectedIntro.name} is selected for ${formatNumber(selectedIntro.price)} diamonds. Purchasing will be enabled when the Mall checkout is connected.`)}
+            onBuy={() => Alert.alert('Buy Prop', `${selectedIntro.name} is selected for ${formatNumber(selectedIntro.diamond_cost ?? selectedIntro.price)} diamonds. Purchasing will be enabled when the Mall checkout is connected.`)}
             onSend={() => Alert.alert('Send Prop', `${selectedIntro.name} is selected. Choose-a-friend gifting will be connected here.`)}
           />
         ) : mode === 'mall' && category === 'Frame' && selectedFrame ? (

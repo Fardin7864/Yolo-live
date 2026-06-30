@@ -35,6 +35,7 @@ const PROFILE_ASSETS = {
   rewards: require('../../../assets/profile/rewards.png'),
   mall: require('../../../assets/profile/mall.png'),
   props: require('../../../assets/profile/props.png'),
+  earning: require('../../../assets/profile/earning.png'),
 };
 
 const PURCHASED_PROFILE_FRAMES = {
@@ -151,8 +152,8 @@ export default function ProfileScreen() {
 
   const actionCards = [
     { title: 'My Wallet', subtitle: formatNumber(beans), artwork: PROFILE_ASSETS.wallet, colors: ['#A50083', '#4E0A6B'], route: '/main/wallet', coin: true },
-    { title: 'Mall', subtitle: 'Shop Items', artwork: PROFILE_ASSETS.mall, colors: ['#D45224', '#8A164F'], route: '/main/mall' },
-    { title: 'My Props', subtitle: 'View Collection', artwork: PROFILE_ASSETS.props, colors: ['#B57A08', '#7220A5'], route: '/main/mall?tab=props' },
+    { title: 'Store', subtitle: 'Shop Items', artwork: PROFILE_ASSETS.mall, colors: ['#D45224', '#8A164F'], route: '/main/mall' },
+    { title: 'My Earning', subtitle: 'View Income', artwork: PROFILE_ASSETS.earning, colors: ['#B57A08', '#7220A5'], route: '/main/earnings' },
     { title: 'My Diamonds', subtitle: formatNumber(diamonds), artwork: PROFILE_ASSETS.diamonds, colors: ['#C04A44', '#791647'], route: '/main/wallet', coin: true },
     { title: 'Top Up', subtitle: 'Get Diamonds', artwork: PROFILE_ASSETS.topup, colors: ['#7424CD', '#26108B'], route: '/main/wallet' },
     { title: 'Rewards', subtitle: 'Earn Gifts', artwork: PROFILE_ASSETS.rewards, colors: ['#0080B8', '#053B89'], route: '/main/tasks' },

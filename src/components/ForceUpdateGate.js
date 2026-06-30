@@ -68,7 +68,7 @@ export default function ForceUpdateGate({ children }) {
       </View>
       <Text style={s.title}>Update required</Text>
       <Text style={s.body}>
-        A newer version of Yolo-Live is available with security and
+        A newer version of Care Live is available with security and
         stability fixes. Please update to continue using the app.
       </Text>
       <Text style={s.versionRow}>

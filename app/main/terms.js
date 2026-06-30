@@ -22,13 +22,13 @@ export default function TermsScreen() {
 
         <Text style={styles.sectionTitle}>1. Acceptance of Terms</Text>
         <Text style={styles.paragraph}>
-          By accessing and using the Yolo-Live mobile application ("Service"), you agree to be bound by these Terms of Service. If you do not agree to these terms, please do not use the app.
+          By accessing and using the Care Live mobile application ("Service"), you agree to be bound by these Terms of Service. If you do not agree to these terms, please do not use the app.
         </Text>
 
         <Text style={styles.sectionTitle}>2. User Conduct & Live Broadcasting</Text>
         <Text style={styles.paragraph}>
           As a user or host, you agree not to broadcast, stream, or share any content that is illegal, abusive, harassing, or violates the intellectual property rights of others. 
-          Yolo-Live reserves the right to terminate accounts that violate our safety guidelines without prior notice.
+          Care Live reserves the right to terminate accounts that violate our safety guidelines without prior notice.
         </Text>
 
         <Text style={styles.sectionTitle}>3. Virtual Currency & Transactions</Text>
@@ -38,7 +38,7 @@ export default function TermsScreen() {
 
         <Text style={styles.sectionTitle}>4. Subscriptions (VIP/VVIP)</Text>
         <Text style={styles.paragraph}>
-          VIP and VVIP subscriptions provide enhanced account features. Fees are non-refundable once the subscription is activated. Yolo-Live reserves the right to modify subscription perks at any time.
+          VIP and VVIP subscriptions provide enhanced account features. Fees are non-refundable once the subscription is activated. Care Live reserves the right to modify subscription perks at any time.
         </Text>
 
         <Text style={styles.sectionTitle}>5. Account Termination</Text>
@@ -48,7 +48,7 @@ export default function TermsScreen() {
 
         <Text style={styles.sectionTitle}>6. Limitation of Liability</Text>
         <Text style={styles.paragraph}>
-          In no event shall Yolo-Live or its developers be liable for any indirect, incidental, or consequential damages arising out of your use of the application.
+          In no event shall Care Live or its developers be liable for any indirect, incidental, or consequential damages arising out of your use of the application.
         </Text>
         
         <View style={{ height: 40 }} />

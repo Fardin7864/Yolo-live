@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS public.system_settings (
 
 -- Seed defaults
 INSERT INTO public.system_settings (key, value) VALUES
-  ('platform_name',    '"YOLO LIVE"'::JSONB),
+  ('platform_name',    '"Care Live"'::JSONB),
   ('support_email',    '"support@yolo.live"'::JSONB),
   ('signup_enabled',   'true'::JSONB),
   ('live_enabled',     'true'::JSONB),

@@ -21,7 +21,7 @@ export default function MaintenanceGate({ children }) {
   const isAdmin = role === 'admin' || role === 'super_admin';
   if (!systemSettings.maintenance_mode || isAdmin) return children;
 
-  const platform = systemSettings.platform_name || 'YOLO LIVE';
+  const platform = systemSettings.platform_name || 'Care Live';
   const message = systemSettings.maintenance_message ||
     "We'll be right back. Maintenance in progress.";
 

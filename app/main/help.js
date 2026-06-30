@@ -51,7 +51,7 @@ export default function HelpScreen() {
   const [openIdx, setOpenIdx] = useState(null);
 
   const openEmail = async () => {
-    const url = `mailto:${SUPPORT_EMAIL}?subject=Yolo-Live%20Support&body=Hi%20team%2C%20I%20need%20help%20with...`;
+    const url = `mailto:${SUPPORT_EMAIL}?subject=Care%20Live%20Support&body=Hi%20team%2C%20I%20need%20help%20with...`;
     try {
       await Linking.openURL(url);
     } catch (_) {

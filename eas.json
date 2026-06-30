@@ -17,7 +17,10 @@
       "android": {
         "buildType": "apk"
       },
-      "channel": "preview"
+      "channel": "preview",
+      "env": {
+        "EXPO_PUBLIC_ROYAL_FEAST_URL": "https://html5-games-seven.vercel.app/"
+      }
     },
     "production": {
       "android": {
