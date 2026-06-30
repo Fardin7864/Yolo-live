@@ -31,6 +31,11 @@ const EMPTY_BACKGROUNDS = {
   nearby: require('../../../assets/home/empty/nearby.png'),
   live: require('../../../assets/home/empty/live.png'),
 };
+const HOME_PROFILE_FRAMES = {
+  'heart-fantasy': require('../../../assets/mall/frames/heart-fantasy.webp'),
+  'angel-wing': require('../../../assets/mall/frames/angel-wing.webp'),
+  'royal-gold': require('../../../assets/mall/frames/royal-gold.webp'),
+};
 const FALLBACK_CAROUSEL = [
   LOCAL_HERO, AUTH_BACKGROUND, APP_BACKGROUND, EMPTY_BACKGROUNDS.live, EMPTY_BACKGROUNDS.nearby,
   EMPTY_BACKGROUNDS.events, LOCAL_HERO, APP_BACKGROUND, AUTH_BACKGROUND, EMPTY_BACKGROUNDS.live,
@@ -65,16 +70,25 @@ function SafeImage({ uri, style, fallback = LOCAL_AVATAR }) {
 }
 
 function HomeHeader({ user, unreadCount, onProfile, onSearch, onNotifications }) {
+  const purchasedFrame = user?.selectedProfileFrameUrl && !user.selectedProfileFrameUrl.startsWith('bundled://')
+    ? { uri: user.selectedProfileFrameUrl }
+    : HOME_PROFILE_FRAMES[user?.selectedProfileFrame];
+
   return (
     <View style={styles.header}>
       <TouchableOpacity onPress={onProfile} activeOpacity={0.82} style={styles.avatarTouch}>
         <LinearGradient colors={['#20D8FF', '#8B43FF', '#F62AD9']} style={styles.avatarRing}>
           <SafeImage uri={user?.avatar} style={styles.headerAvatar} />
         </LinearGradient>
+        {purchasedFrame ? (
+          <Image pointerEvents="none" source={purchasedFrame} style={styles.headerProfileFrame} />
+        ) : null}
         <View style={styles.onlineDot} />
-        <View style={styles.crownBubble}>
-          <Text style={styles.crownText}>👑</Text>
-        </View>
+        {!purchasedFrame ? (
+          <View style={styles.crownBubble}>
+            <Text style={styles.crownText}>👑</Text>
+          </View>
+        ) : null}
       </TouchableOpacity>
       <View style={styles.headerActions}>
         <TouchableOpacity accessibilityLabel="Search" onPress={onSearch} style={styles.headerIcon}>
@@ -506,9 +520,10 @@ const styles = StyleSheet.create({
     height: 76, paddingHorizontal: 18, flexDirection: 'row',
     alignItems: 'center', justifyContent: 'space-between',
   },
-  avatarTouch: { width: 52, height: 52 },
-  avatarRing: { width: 52, height: 52, borderRadius: 26, padding: 2.5 },
+  avatarTouch: { width: 62, height: 62, alignItems: 'center', justifyContent: 'center' },
+  avatarRing: { width: 48, height: 48, borderRadius: 24, padding: 2.5 },
   headerAvatar: { width: '100%', height: '100%', borderRadius: 24, backgroundColor: '#17133F' },
+  headerProfileFrame: { position: 'absolute', width: 62, height: 62, resizeMode: 'contain' },
   onlineDot: {
     position: 'absolute', right: 0, bottom: 1, width: 13, height: 13,
     borderRadius: 7, backgroundColor: '#25E875', borderWidth: 2, borderColor: '#17103F',
