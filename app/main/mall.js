@@ -7,11 +7,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useVideoPlayer, VideoView } from 'expo-video';
-import * as Audio from 'expo-audio';
+import { VideoView } from 'expo-video';
 import { useGlobalState } from '../../src/context/GlobalStateContext';
 import { supabase } from '../../src/api/supabase';
 import LogoLoader from '../../src/components/LogoLoader';
+import { useOneShotIntroPlayer } from '../../src/hooks/useOneShotIntroPlayer';
 
 const BANNER = require('../../assets/mall/unique-props-banner.png');
 
@@ -45,15 +45,6 @@ const mediaSource = (url) => {
   if (typeof url === 'number') return url;
   if (url?.startsWith?.('bundled://')) return BUNDLED_INTRO_ASSETS[url.replace('bundled://', '')];
   return url ? { uri: url } : null;
-};
-
-const configureIntroVideoPlayer = (instance) => {
-  instance.loop = false;
-  instance.muted = false;
-  instance.volume = 1;
-  // Admin uploads a single MP4. The embedded audio must play from the same
-  // video source, so force this short preview to claim media audio focus.
-  instance.audioMixingMode = 'doNotMix';
 };
 
 const FRAME_ITEMS = [
@@ -133,7 +124,9 @@ function OwnedCard({ item, width, onPress }) {
   );
 }
 
-function IntroCard({ item, width, selected, onPress }) {
+function IntroCard({ item, width, selected, owned, active, onPress }) {
+  const statusLabel = active ? 'Using' : owned ? 'Use' : null;
+
   return (
     <TouchableOpacity
       activeOpacity={0.88}
@@ -150,10 +143,16 @@ function IntroCard({ item, width, selected, onPress }) {
         <View style={styles.selectedBadge}><Ionicons name="checkmark" size={14} color="#FFFFFF" /></View>
       ) : null}
       <Text style={styles.introName} numberOfLines={2}>{item.name}</Text>
-      <View style={styles.introPriceRow}>
-        <Ionicons name="diamond" size={12} color="#72A9FF" />
-        <Text style={styles.introPrice}>{formatNumber(item.diamond_cost ?? item.price)}</Text>
-      </View>
+      {statusLabel ? (
+        <View style={[styles.introStatusPill, active && styles.introStatusPillActive]}>
+          <Text style={styles.introStatusText}>{statusLabel}</Text>
+        </View>
+      ) : (
+        <View style={styles.introPriceRow}>
+          <Ionicons name="diamond" size={12} color="#72A9FF" />
+          <Text style={styles.introPrice}>{formatNumber(item.diamond_cost ?? item.price)}</Text>
+        </View>
+      )}
     </TouchableOpacity>
   );
 }
@@ -195,66 +194,18 @@ function FrameCard({ item, width, user, selected, onPress }) {
 
 function AnimationPreview({ item, onClose }) {
   const introSource = useMemo(() => mediaSource(item.video_url) || item.video, [item]);
-  const firstFrameStartedRef = useRef(false);
-  const player = useVideoPlayer(introSource, (instance) => {
-    configureIntroVideoPlayer(instance);
-  });
-
-  const playWithSound = useCallback(() => {
-    try {
-      configureIntroVideoPlayer(player);
-      player.replay();
-    } catch (e) {
-      if (__DEV__) console.warn('intro preview replay:', e?.message || e);
-      try { player.play(); } catch (_) {}
-    }
-  }, [player]);
-
-  useEffect(() => {
-    let mounted = true;
-    Audio.setIsAudioActiveAsync?.(true).catch((e) => {
-      if (__DEV__) console.warn('intro preview audio active:', e?.message || e);
-    });
-    Audio.setAudioModeAsync({
-      playsInSilentMode: true,
-      shouldPlayInBackground: false,
-      interruptionMode: 'doNotMix',
-      interruptionModeAndroid: 'doNotMix',
-      allowsRecording: false,
-      allowsRecordingIOS: false,
-      shouldRouteThroughEarpiece: false,
-    }).catch((e) => {
-      if (__DEV__) console.warn('intro preview audio mode:', e?.message || e);
-    }).finally(() => {
-      if (mounted) playWithSound();
-    });
-    const retry = setTimeout(() => {
-      if (mounted) playWithSound();
-    }, 220);
-    const subscription = player.addListener('playToEnd', onClose);
-    return () => {
-      mounted = false;
-      clearTimeout(retry);
-      subscription.remove();
-      try { player.pause(); } catch (_) {}
-    };
-  }, [onClose, playWithSound, player]);
+  const { player, ready, finish } = useOneShotIntroPlayer(introSource, onClose);
 
   return (
-    <Modal visible transparent animationType="fade" statusBarTranslucent onRequestClose={onClose}>
+    <Modal visible transparent animationType="fade" statusBarTranslucent onRequestClose={finish}>
       <View style={styles.previewBackdrop}>
-        <TouchableOpacity activeOpacity={1} style={styles.previewTapArea} onPress={onClose}>
+        <TouchableOpacity activeOpacity={1} style={styles.previewTapArea} onPress={finish}>
           <VideoView
             player={player}
-            style={styles.previewVideo}
+            style={[styles.previewVideo, !ready && styles.introVideoHidden]}
             nativeControls={false}
             contentFit="contain"
             pointerEvents="none"
-            onFirstFrameRender={() => {
-              if (firstFrameStartedRef.current) return;
-              firstFrameStartedRef.current = true;
-              playWithSound();
-            }}
           />
         </TouchableOpacity>
       </View>
@@ -262,7 +213,7 @@ function AnimationPreview({ item, onClose }) {
   );
 }
 
-function IntroActions({ item, onBuy, onSend }) {
+function IntroActions({ item, primaryLabel = 'Buy', primaryDisabled = false, onBuy, onSend }) {
   const pulse = React.useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -287,15 +238,15 @@ function IntroActions({ item, onBuy, onSend }) {
       <Text style={styles.selectedIntroLabel} numberOfLines={1}>{item.name}</Text>
       <View style={styles.introActionRow}>
         <Animated.View style={[styles.introActionWrap, animatedStyle]}>
-          <TouchableOpacity activeOpacity={0.86} onPress={onBuy}>
+          <TouchableOpacity activeOpacity={0.86} onPress={onBuy} disabled={primaryDisabled}>
             <LinearGradient
-              colors={['#FF3BBE', '#8D35F1']}
+              colors={primaryDisabled ? ['#5B5875', '#3B3954'] : primaryLabel === 'Use' ? ['#16B6C8', '#6A43F5'] : ['#FF3BBE', '#8D35F1']}
               start={{ x: 0, y: 0.5 }}
               end={{ x: 1, y: 0.5 }}
-              style={styles.introActionButton}
+              style={[styles.introActionButton, primaryDisabled && styles.introActionButtonDisabled]}
             >
-              <Ionicons name="bag-check" size={19} color="#FFFFFF" />
-              <Text style={styles.introActionText}>Buy</Text>
+              <Ionicons name={primaryLabel === 'Buy' ? 'bag-check' : 'checkmark-circle'} size={19} color="#FFFFFF" />
+              <Text style={styles.introActionText}>{primaryLabel}</Text>
             </LinearGradient>
           </TouchableOpacity>
         </Animated.View>
@@ -338,6 +289,10 @@ export default function MallScreen() {
   const [availableFrames, setAvailableFrames] = useState(FRAME_ITEMS);
   const [buyingFrame, setBuyingFrame] = useState(false);
   const refreshUserRef = useRef(refreshUser);
+  const ownedIntroIds = useMemo(
+    () => new Set(Array.isArray(user?.ownedMallIntros) ? user.ownedMallIntros : []),
+    [user?.ownedMallIntros],
+  );
 
   useEffect(() => {
     setMode(params.tab === 'props' ? 'props' : 'mall');
@@ -469,6 +424,10 @@ export default function MallScreen() {
 
   const buySelectedIntro = async () => {
     if (!selectedIntro || buyingIntro) return;
+    const isOwned = ownedIntroIds.has(selectedIntro.id);
+    const isActive = user?.selectedMallIntro === selectedIntro.id;
+    if (isOwned && isActive) return;
+
     setBuyingIntro(true);
     const { data, error } = await supabase.rpc('purchase_mall_intro', { p_intro_id: selectedIntro.id });
     if (!error && data?.success) await refreshUser();
@@ -477,7 +436,7 @@ export default function MallScreen() {
       Alert.alert('Purchase failed', error.message);
       return;
     }
-    Alert.alert('Intro selected', `${selectedIntro.name} will play when you join a live room.`);
+    Alert.alert(isOwned ? 'Intro selected' : 'Intro purchased', `${selectedIntro.name} will play when you join a live room.`);
   };
 
   const openSendIntro = (intro) => {
@@ -599,6 +558,8 @@ export default function MallScreen() {
                     item={item}
                     width={cardWidth}
                     selected={selectedIntro?.id === item.id}
+                    owned={ownedIntroIds.has(item.id)}
+                    active={user?.selectedMallIntro === item.id}
                     onPress={() => {
                       setSelectedIntro(item);
                       setPreviewIntro(item);
@@ -662,6 +623,8 @@ export default function MallScreen() {
         {mode === 'mall' && category === 'Intro' && selectedIntro ? (
           <IntroActions
             item={selectedIntro}
+            primaryLabel={user?.selectedMallIntro === selectedIntro.id ? 'Using' : ownedIntroIds.has(selectedIntro.id) ? 'Use' : 'Buy'}
+            primaryDisabled={user?.selectedMallIntro === selectedIntro.id}
             onBuy={buySelectedIntro}
             onSend={() => openSendIntro(selectedIntro)}
           />
@@ -761,6 +724,9 @@ const styles = StyleSheet.create({
   introName: { position: 'absolute', left: 8, right: 8, bottom: 28, color: '#FFFFFF', fontSize: 11.5, lineHeight: 15, textAlign: 'center', fontWeight: '700' },
   introPriceRow: { position: 'absolute', left: 8, right: 8, bottom: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4 },
   introPrice: { color: '#A96BFF', fontSize: 11, fontWeight: '900' },
+  introStatusPill: { position: 'absolute', left: 8, right: 8, bottom: 8, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(27, 186, 202, 0.86)', borderWidth: 1, borderColor: 'rgba(255,255,255,.3)' },
+  introStatusPillActive: { backgroundColor: 'rgba(140, 64, 243, 0.9)' },
+  introStatusText: { color: '#FFFFFF', fontSize: 10.5, fontWeight: '900' },
   initialAvatar: { alignItems: 'center', justifyContent: 'center' },
   initialText: { color: '#FFFFFF', fontSize: 34, fontWeight: '900' },
   profileFrameShowcase: { height: 155, marginHorizontal: 16, borderRadius: 14, overflow: 'hidden', alignItems: 'center', justifyContent: 'center', backgroundColor: '#101333', borderWidth: 1, borderColor: 'rgba(122,72,226,.5)' },
@@ -780,10 +746,12 @@ const styles = StyleSheet.create({
   introActionRow: { flexDirection: 'row', gap: 10 },
   introActionWrap: { flex: 1, borderRadius: 22, shadowColor: '#B645FF', shadowOpacity: .55, shadowRadius: 10, elevation: 7 },
   introActionButton: { height: 44, borderRadius: 22, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,.38)' },
+  introActionButtonDisabled: { opacity: 0.88 },
   introActionText: { color: '#FFFFFF', fontSize: 14, fontWeight: '900' },
-  previewBackdrop: { flex: 1, backgroundColor: '#000000', alignItems: 'center', justifyContent: 'center' },
-  previewTapArea: { width: '100%' },
-  previewVideo: { width: '100%', aspectRatio: 9 / 16, backgroundColor: '#000000' },
+  previewBackdrop: { flex: 1, backgroundColor: 'rgba(4, 5, 22, 0.72)', alignItems: 'center', justifyContent: 'center' },
+  previewTapArea: { flex: 1, width: '100%', alignItems: 'center', justifyContent: 'center' },
+  previewVideo: { width: '100%', maxHeight: '92%', aspectRatio: 9 / 16, backgroundColor: 'transparent' },
+  introVideoHidden: { opacity: 0 },
   sendIntroOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.72)', alignItems: 'center', justifyContent: 'center', padding: 22 },
   sendIntroCard: { width: '100%', maxWidth: 360, borderRadius: 24, padding: 20, backgroundColor: '#111431', borderWidth: 1, borderColor: 'rgba(151,75,255,.45)' },
   sendIntroTitle: { color: '#FFF', fontSize: 20, fontWeight: '900', textAlign: 'center' },

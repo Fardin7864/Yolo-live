@@ -11,7 +11,7 @@ import * as Linking from 'expo-linking';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Audio from 'expo-audio';
 import * as MediaLibrary from 'expo-media-library';
-import { useVideoPlayer, VideoView } from 'expo-video';
+import { VideoView } from 'expo-video';
 import LottieView from 'lottie-react-native';
 import VipAvatar from '../../src/components/VipAvatar';
 import { usePreventScreenCapture } from 'expo-screen-capture';
@@ -29,10 +29,11 @@ import { supabase } from '../../src/api/supabase';
 import { useAgoraEngine } from '../../src/hooks/useAgoraEngine';
 import { agoraUidFromId } from '../../src/api/agora';
 import { BRAND } from '../../src/theme/brand';
+import { useOneShotIntroPlayer } from '../../src/hooks/useOneShotIntroPlayer';
 
 const { width, height } = Dimensions.get('screen');
-const MALL_INTRO_MAX_HEIGHT = height * 0.8;
-const MALL_INTRO_WIDTH = Math.min(width * 0.92, MALL_INTRO_MAX_HEIGHT * 9 / 16);
+const MALL_INTRO_MAX_HEIGHT = height * 0.92;
+const MALL_INTRO_WIDTH = width;
 
 // ─────────────────────────────────────────────────────────────────────
 // Lucky Bag asset
@@ -72,77 +73,17 @@ const mallIntroMediaSource = (url) => {
   return url ? { uri: url } : null;
 };
 
-const configureIntroVideoPlayer = (instance) => {
-  instance.loop = false;
-  instance.muted = false;
-  instance.volume = 1;
-  // Intros are short, intentional foreground media. `doNotMix` forces the
-  // embedded MP4/AAC track to claim audio focus instead of rendering silently
-  // behind the live-room audio session on Android/dev-client builds.
-  instance.audioMixingMode = 'doNotMix';
-};
-
 function MallIntroOverlay({ intro, source, onDone }) {
-  const firstFrameStartedRef = useRef(false);
-  const player = useVideoPlayer(source, (instance) => {
-    configureIntroVideoPlayer(instance);
-  });
-
-  const playWithSound = useCallback(() => {
-    try {
-      configureIntroVideoPlayer(player);
-      player.replay();
-    } catch (e) {
-      if (__DEV__) console.warn('intro video replay:', e?.message || e);
-      try { player.play(); } catch (_) {}
-    }
-  }, [player]);
-
-  useEffect(() => {
-    let mounted = true;
-    Audio.setIsAudioActiveAsync?.(true).catch((e) => {
-      if (__DEV__) console.warn('intro audio active:', e?.message || e);
-    });
-    Audio.setAudioModeAsync({
-      playsInSilentMode: true,
-      shouldPlayInBackground: false,
-      interruptionMode: 'doNotMix',
-      interruptionModeAndroid: 'doNotMix',
-      allowsRecording: false,
-      allowsRecordingIOS: false,
-      shouldRouteThroughEarpiece: false,
-    }).catch((e) => {
-      if (__DEV__) console.warn('intro audio mode:', e?.message || e);
-    }).finally(() => {
-      if (mounted) playWithSound();
-    });
-    const retry = setTimeout(() => {
-      if (mounted) playWithSound();
-    }, 220);
-    const subscription = player.addListener('playToEnd', onDone);
-    const timer = setTimeout(onDone, 7000);
-    return () => {
-      mounted = false;
-      clearTimeout(retry);
-      subscription.remove();
-      clearTimeout(timer);
-      try { player.pause(); } catch (_) {}
-    };
-  }, [onDone, playWithSound, player]);
+  const { player, ready } = useOneShotIntroPlayer(source, onDone);
 
   return (
     <View style={styles.mallIntroOverlay} pointerEvents="none">
       <VideoView
         player={player}
-        style={styles.mallIntroVideo}
+        style={[styles.mallIntroVideo, !ready && styles.mallIntroVideoHidden]}
         nativeControls={false}
         contentFit="contain"
         pointerEvents="none"
-        onFirstFrameRender={() => {
-          if (firstFrameStartedRef.current) return;
-          firstFrameStartedRef.current = true;
-          playWithSound();
-        }}
       />
       <View style={styles.mallIntroNamePill}>
         <Text style={styles.mallIntroNameText} numberOfLines={1}>{intro?.name || 'Special entrance'}</Text>
@@ -300,10 +241,28 @@ export default function BroadcastRoomScreen() {
   const [activeGiftAnimation, setActiveGiftAnimation] = useState({ id: null, source: null, loop: false });
   const [activeGiftTab, setActiveGiftTab] = useState('Classic');
   const [activeMallIntro, setActiveMallIntro] = useState(null);
+  const [mallIntroQueue, setMallIntroQueue] = useState([]);
+  const playedMallIntroUserIdsRef = useRef(new Set());
+  const sentMallIntroUserIdsRef = useRef(new Set());
   const activeMallIntroSource = useMemo(
     () => activeMallIntro ? mallIntroMediaSource(activeMallIntro.videoUrl || activeMallIntro.video_url) : null,
     [activeMallIntro]
   );
+
+  const queueMallIntro = useCallback((intro) => {
+    setMallIntroQueue((prev) => [...prev, intro]);
+  }, []);
+
+  useEffect(() => {
+    if (activeMallIntro || mallIntroQueue.length === 0) return;
+    const [nextIntro, ...rest] = mallIntroQueue;
+    setMallIntroQueue(rest);
+    setActiveMallIntro(nextIntro);
+  }, [activeMallIntro, mallIntroQueue]);
+
+  const finishActiveMallIntro = useCallback(() => {
+    setActiveMallIntro(null);
+  }, []);
 
   // Combo & Floating Toast System
   const [combo, setCombo] = useState({ active: false, count: 0, giftId: null });
@@ -499,19 +458,39 @@ export default function BroadcastRoomScreen() {
     if (!channelRef.current || !introUser?.id || !introUser?.selectedMallIntro || !introUser?.selectedMallIntroVideoUrl) {
       return;
     }
-    channelRef.current.send({
-      type: 'broadcast',
-      event: 'mall_intro',
-      payload: {
-        id: introUser.id,
-        ts: Date.now(),
-        name: introUser.name || 'A viewer',
-        introId: introUser.selectedMallIntro,
-        videoUrl: introUser.selectedMallIntroVideoUrl,
-        thumbnailUrl: introUser.selectedMallIntroThumbnailUrl,
-      },
-    });
-  }, []);
+    const userKey = `${id}:${introUser.id}`;
+    if (sentMallIntroUserIdsRef.current.has(userKey)) return;
+    sentMallIntroUserIdsRef.current.add(userKey);
+    const payload = {
+      id: introUser.id,
+      ts: Date.now(),
+      name: introUser.name || 'A viewer',
+      introId: introUser.selectedMallIntro,
+      videoUrl: introUser.selectedMallIntroVideoUrl,
+      thumbnailUrl: introUser.selectedMallIntroThumbnailUrl,
+    };
+    if (!playedMallIntroUserIdsRef.current.has(userKey)) {
+      playedMallIntroUserIdsRef.current.add(userKey);
+      queueMallIntro({
+        id: `${payload.id}-${payload.ts}`,
+        name: payload.name,
+        videoUrl: payload.videoUrl,
+        audioUrl: payload.audioUrl || payload.audio_url || null,
+      });
+    }
+    channelRef.current.send({ type: 'broadcast', event: 'mall_intro', payload });
+  }, [id, queueMallIntro]);
+
+  useEffect(() => {
+    if (isHostView || !user?.id || !user?.selectedMallIntro || !user?.selectedMallIntroVideoUrl) return;
+    broadcastMallIntroForUser(user);
+  }, [
+    broadcastMallIntroForUser,
+    isHostView,
+    user?.id,
+    user?.selectedMallIntro,
+    user?.selectedMallIntroVideoUrl,
+  ]);
 
   const SFX_ASSETS = {
     Clap: require('../../assets/audio/clap.mp3'),
@@ -1721,7 +1700,6 @@ export default function BroadcastRoomScreen() {
         if (payload.guestId === user?.id) {
           // Just go live on the seat — no popup.
           setCallRequestStatus('accepted');
-          broadcastMallIntroForUser(user);
         }
       })
       .on('broadcast', { event: 'seat_update' }, ({ payload }) => {
@@ -1781,12 +1759,15 @@ export default function BroadcastRoomScreen() {
       })
       .on('broadcast', { event: 'mall_intro' }, ({ payload }) => {
         if (!payload?.id || !payload?.videoUrl) return;
-          setActiveMallIntro({
-            id: `${payload.id}-${payload.ts || Date.now()}`,
-            name: payload.name || 'Special entrance',
-            videoUrl: payload.videoUrl,
-            audioUrl: payload.audioUrl || payload.audio_url || null,
-          });
+        const userKey = `${id}:${payload.id}`;
+        if (playedMallIntroUserIdsRef.current.has(userKey)) return;
+        playedMallIntroUserIdsRef.current.add(userKey);
+        queueMallIntro({
+          id: `${payload.id}-${payload.ts || Date.now()}`,
+          name: payload.name || 'Special entrance',
+          videoUrl: payload.videoUrl,
+          audioUrl: payload.audioUrl || payload.audio_url || null,
+        });
       })
       .on('broadcast', { event: 'room_state' }, ({ payload }) => {
         // Viewers/guests mirror the host's synced controls (title, goal,
@@ -1911,6 +1892,9 @@ export default function BroadcastRoomScreen() {
             vipExpiresAt: user?.vipExpiresAt || null,
             selectedProfileFrame: user?.selectedProfileFrame || null,
             selectedProfileFrameUrl: user?.selectedProfileFrameUrl || null,
+            selectedMallIntro: user?.selectedMallIntro || null,
+            selectedMallIntroVideoUrl: user?.selectedMallIntroVideoUrl || null,
+            selectedMallIntroThumbnailUrl: user?.selectedMallIntroThumbnailUrl || null,
           });
 
           // Host publishes its current room state so anyone already here syncs.
@@ -1930,6 +1914,8 @@ export default function BroadcastRoomScreen() {
                 color: '#38BDF8',
               },
             });
+
+            broadcastMallIntroForUser(user);
 
             // VIP/SVIP/VVIP get a fullscreen entrance banner — the active-tier
             // check is done by the joiner so non-active VIPs don't spam.
@@ -4658,7 +4644,6 @@ export default function BroadcastRoomScreen() {
                             payload: { activeGuests: newSeats, audioSlotCount }
                           });
                         }
-                        broadcastMallIntroForUser(myUser);
                       }
                     } else {
                       setShowManageCalls(true);
@@ -6586,7 +6571,7 @@ export default function BroadcastRoomScreen() {
             key={activeMallIntro.id}
             intro={activeMallIntro}
             source={activeMallIntroSource}
-            onDone={() => setActiveMallIntro(null)}
+            onDone={finishActiveMallIntro}
           />
         ) : null}
 
@@ -6750,29 +6735,31 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     zIndex: 210,
     elevation: 210,
-    backgroundColor: 'rgba(0,0,0,0.72)',
+    backgroundColor: 'rgba(0,0,0,0.62)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   mallIntroVideo: {
     width: MALL_INTRO_WIDTH,
     height: MALL_INTRO_MAX_HEIGHT,
-    maxHeight: height * 0.8,
-    borderRadius: 22,
-    overflow: 'hidden',
+    maxHeight: height * 0.92,
+    backgroundColor: 'transparent',
+  },
+  mallIntroVideoHidden: {
+    opacity: 0,
   },
   mallIntroNamePill: {
     position: 'absolute',
     bottom: Math.max(44, height * 0.1),
     maxWidth: width * 0.82,
-    paddingHorizontal: 18,
-    paddingVertical: 8,
-    borderRadius: 18,
-    backgroundColor: 'rgba(9, 8, 34, 0.78)',
+    paddingHorizontal: 15,
+    paddingVertical: 7,
+    borderRadius: 16,
+    backgroundColor: 'rgba(9, 8, 34, 0.58)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.16)',
+    borderColor: 'rgba(255,255,255,0.12)',
   },
-  mallIntroNameText: { color: '#FFF', fontSize: 14, fontWeight: '900' },
+  mallIntroNameText: { color: '#FFF', fontSize: 13, fontWeight: '800' },
 
   topActions: { position: 'absolute', left: 0, right: 0, flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 16, zIndex: 110, alignItems: 'flex-start' },
   // Left wrapper for the host bar. Uses flex so the bar can shrink

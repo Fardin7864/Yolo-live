@@ -76,7 +76,8 @@ const LoginScreen = () => {
 
       router.replace('/main/(tabs)');
     } catch (error) {
-      Alert.alert('Google sign-in failed', error.message);
+      const message = error?.message || 'Google sign-in could not complete.';
+      Alert.alert('Google sign-in failed', message);
     } finally {
       setLoading(false);
     }

@@ -43,15 +43,34 @@ export const GlobalStateProvider = ({ children }) => {
   // ============================================================
   // PROFILE FETCH
   // ============================================================
-  const fetchProfile = async (userId) => {
+  const fetchProfile = async (userId, attempt = 0) => {
     try {
       const { data, error } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', userId)
-        .single();
+        .maybeSingle();
 
       if (error) throw error;
+
+      if (!data) {
+        if (attempt === 0) {
+          await new Promise((resolve) => setTimeout(resolve, 350));
+          return fetchProfile(userId, 1);
+        }
+
+        console.warn('Profile not found for current auth user; signing out stale session.');
+        try { await supabase.auth.signOut(); } catch (_) {}
+        setUser(null);
+        setDiamonds(0);
+        setBeans(0);
+        setRole('user');
+        setOwnedAgency(null);
+        setMyAgency(null);
+        setMyReseller(null);
+        try { router.replace('/auth/login'); } catch (_) {}
+        return;
+      }
 
       if (data) {
         setUser({
@@ -444,8 +463,13 @@ export const GlobalStateProvider = ({ children }) => {
   // AUTH / SESSION
   // ============================================================
   useEffect(() => {
-    supabase.auth.getSession()
+    let cancelled = false;
+    let subscription;
+
+    const initAuth = async () => {
+      supabase.auth.getSession()
       .then(({ data: { session }, error }) => {
+        if (cancelled) return;
         if (error || !session) {
           // Stale/invalid refresh token — clear it out so we don't loop
           if (error?.message?.toLowerCase().includes('refresh token')) {
@@ -457,31 +481,40 @@ export const GlobalStateProvider = ({ children }) => {
         fetchProfile(session.user.id);
       })
       .catch((err) => {
+        if (cancelled) return;
         console.warn('getSession failed:', err?.message);
         supabase.auth.signOut().catch(() => {});
         setLoading(false);
       });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      // TOKEN_REFRESHED with no session = refresh failed; treat as signed-out
-      if (event === 'TOKEN_REFRESHED' && !session) {
-        supabase.auth.signOut().catch(() => {});
-      }
-      if (session) {
-        fetchProfile(session.user.id);
-      } else {
-        setUser(null);
-        setDiamonds(0);
-        setBeans(0);
-        setRole('user');
-        setOwnedAgency(null);
-        setMyAgency(null);
-        setMyReseller(null);
-        setLoading(false);
-      }
-    });
+      const authListener = supabase.auth.onAuthStateChange((event, session) => {
+        if (cancelled) return;
+        // TOKEN_REFRESHED with no session = refresh failed; treat as signed-out
+        if (event === 'TOKEN_REFRESHED' && !session) {
+          supabase.auth.signOut().catch(() => {});
+        }
+        if (session) {
+          fetchProfile(session.user.id);
+        } else {
+          setUser(null);
+          setDiamonds(0);
+          setBeans(0);
+          setRole('user');
+          setOwnedAgency(null);
+          setMyAgency(null);
+          setMyReseller(null);
+          setLoading(false);
+        }
+      });
+      subscription = authListener.data.subscription;
+    };
 
-    return () => subscription.unsubscribe();
+    initAuth();
+
+    return () => {
+      cancelled = true;
+      subscription?.unsubscribe();
+    };
   }, []);
 
   // ============================================================

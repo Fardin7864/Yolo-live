@@ -71,8 +71,7 @@ const TENANT_CONFIG = {
   },
 
   // Google Sign-In uses the native Google account picker. The Web client ID
-  // is still required because Supabase verifies the ID token Google returns;
-  // no browser redirect is involved.
+  // is required so Google returns an ID token that Supabase can verify.
   googleAuth: {
     webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || '',
     iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || '',

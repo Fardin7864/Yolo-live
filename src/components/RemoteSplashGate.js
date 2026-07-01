@@ -3,10 +3,12 @@ import LottieView from 'lottie-react-native';
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Image, StyleSheet, StatusBar, View } from 'react-native';
 import { supabase } from '../api/supabase';
+import { TENANT_CONFIG } from '../../tenant.config';
 
 const CACHE_KEY = 'care-live-active-splash';
-const DEFAULT_BACKGROUND = '#0F091E';
+const DEFAULT_BACKGROUND = TENANT_CONFIG.splashBg || '#0F091E';
 const FADE_OUT_MS = 350;
+const FALLBACK_LOGO = require('../../assets/splash-icon.png');
 
 let shownThisSession = false;
 
@@ -106,7 +108,15 @@ export default function RemoteSplashGate() {
       ) : splash ? (
         <Image source={{ uri: splash.media_url }} style={styles.media} resizeMode="cover" />
       ) : (
-        <View style={styles.media} />
+        <View style={styles.fallback}>
+          <Image
+            source={FALLBACK_LOGO}
+            style={styles.fallbackLogo}
+            resizeMode="contain"
+            fadeDuration={0}
+            accessibilityLabel={TENANT_CONFIG.appName}
+          />
+        </View>
       )}
     </Animated.View>
   );
@@ -121,4 +131,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   media: { width: '100%', height: '100%' },
+  fallback: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fallbackLogo: {
+    width: 168,
+    height: 168,
+  },
 });

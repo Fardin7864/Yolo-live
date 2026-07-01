@@ -29,9 +29,7 @@ const PROFILE_ASSETS = {
   badges: require('../../../assets/profile/badges.png'),
   invites: require('../../../assets/profile/invites.png'),
   history: require('../../../assets/profile/history.png'),
-  wallet: require('../../../assets/profile/wallet.png'),
   diamonds: require('../../../assets/profile/diamonds.png'),
-  topup: require('../../../assets/profile/topup.png'),
   rewards: require('../../../assets/profile/rewards.png'),
   mall: require('../../../assets/profile/mall.png'),
   props: require('../../../assets/profile/props.png'),
@@ -70,7 +68,7 @@ export default function ProfileScreen() {
   const router = useRouter();
   const { width } = useWindowDimensions();
   const { maxContentWidth, isTablet } = useResponsive();
-  const { diamonds, beans, user, loading, myReseller, systemSettings } = useGlobalState();
+  const { diamonds, user, loading, myReseller, systemSettings } = useGlobalState();
   const [counts, setCounts] = useState({ followers: 0, following: 0, friends: 0 });
   const [countsStatus, setCountsStatus] = useState('loading');
 
@@ -151,11 +149,9 @@ export default function ProfileScreen() {
   ];
 
   const actionCards = [
-    { title: 'My Wallet', subtitle: formatNumber(beans), artwork: PROFILE_ASSETS.wallet, colors: ['#A50083', '#4E0A6B'], route: '/main/wallet', coin: true },
+    { title: 'My Diamonds', subtitle: formatNumber(diamonds), artwork: PROFILE_ASSETS.diamonds, colors: ['#C04A44', '#791647'], route: '/main/wallet', coin: true },
     { title: 'Store', subtitle: 'Shop Items', artwork: PROFILE_ASSETS.mall, colors: ['#D45224', '#8A164F'], route: '/main/mall' },
     { title: 'My Earning', subtitle: 'View Income', artwork: PROFILE_ASSETS.earning, colors: ['#B57A08', '#7220A5'], route: '/main/earnings' },
-    { title: 'My Diamonds', subtitle: formatNumber(diamonds), artwork: PROFILE_ASSETS.diamonds, colors: ['#C04A44', '#791647'], route: '/main/wallet', coin: true },
-    { title: 'Top Up', subtitle: 'Get Diamonds', artwork: PROFILE_ASSETS.topup, colors: ['#7424CD', '#26108B'], route: '/main/wallet' },
     { title: 'Rewards', subtitle: 'Earn Gifts', artwork: PROFILE_ASSETS.rewards, colors: ['#0080B8', '#053B89'], route: '/main/tasks' },
   ];
 
