@@ -309,16 +309,16 @@ export default function MallScreen() {
       const nextIntros = data.length ? data : FALLBACK_INTRO_ITEMS;
       setAvailableIntros(nextIntros);
       setSelectedIntro((current) => {
-        if (current) return nextIntros.find((item) => item.id === current.id) || null;
+        if (current) {
+          return nextIntros.find((item) => item.id === current.id)
+            || nextIntros.find((item) => item.id === user?.selectedMallIntro)
+            || nextIntros[0]
+            || null;
+        }
         return nextIntros.find((item) => item.id === user?.selectedMallIntro) || nextIntros[0] || null;
       });
     }
   }, [user?.selectedMallIntro]);
-
-  useEffect(() => {
-    const activeIntro = availableIntros.find((item) => item.id === user?.selectedMallIntro);
-    if (activeIntro) setSelectedIntro(activeIntro);
-  }, [availableIntros, user?.selectedMallIntro]);
 
   useEffect(() => {
     loadIntros();

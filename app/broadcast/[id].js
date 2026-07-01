@@ -4816,9 +4816,10 @@ export default function BroadcastRoomScreen() {
         show:   true,
       },
       {
-        key:    'slots',
-        label:  'Slots',
+        key:    'chair',
+        label:  'Add Chair',
         icon:   'grid-outline',
+        iconText: '🪑',
         color:  '#38BDF8',
         onPress: () => {
           setSlotInput(String(audioSlotCount));
@@ -4865,7 +4866,11 @@ export default function BroadcastRoomScreen() {
                   activeOpacity={0.85}
                 >
                   <View style={[styles.hostToolsTileIcon, t.active && styles.hostToolsTileIconActive]}>
-                    <Ionicons name={t.icon} size={26} color={t.color} />
+                    {t.iconText ? (
+                      <Text style={styles.hostToolsTileEmoji}>{t.iconText}</Text>
+                    ) : (
+                      <Ionicons name={t.icon} size={26} color={t.color} />
+                    )}
                   </View>
                   <Text style={styles.hostToolsTileLabel}>{t.label}</Text>
                 </TouchableOpacity>
@@ -4885,8 +4890,8 @@ export default function BroadcastRoomScreen() {
         <TouchableOpacity style={styles.slotModalOverlay} activeOpacity={1} onPress={() => setShowSlotModal(false)}>
           <TouchableOpacity activeOpacity={1} style={styles.slotModalCard} onPress={() => {}}>
             <View style={styles.modalHandle} />
-            <Text style={styles.slotModalTitle}>Audio Slots</Text>
-            <Text style={styles.slotModalSubtitle}>Set how many total seats this live stream should show, including the host seat.</Text>
+            <Text style={styles.slotModalTitle}>Chairs</Text>
+            <Text style={styles.slotModalSubtitle}>How many chairs do you want in this live room? This includes the host chair.</Text>
 
             <View style={styles.slotInputRow}>
               <TouchableOpacity
@@ -4912,7 +4917,7 @@ export default function BroadcastRoomScreen() {
               </TouchableOpacity>
             </View>
 
-            <Text style={styles.slotRangeHint}>Allowed: 2–12 total slots</Text>
+            <Text style={styles.slotRangeHint}>Allowed: 2-12 chairs</Text>
 
             <View style={styles.slotModalActions}>
               <TouchableOpacity style={styles.slotCancelBtn} onPress={() => setShowSlotModal(false)}>
@@ -4926,7 +4931,7 @@ export default function BroadcastRoomScreen() {
                 }}
               >
                 <LinearGradient colors={['#00C2FF', '#D92BFF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.slotSaveGradient}>
-                  <Text style={styles.slotSaveText}>Update</Text>
+                  <Text style={styles.slotSaveText}>Save</Text>
                 </LinearGradient>
               </TouchableOpacity>
             </View>
@@ -7028,8 +7033,8 @@ const styles = StyleSheet.create({
     position: 'absolute',
     width: 88,
     height: 88,
-    top: -13,
-    left: -13,
+    top: 0,
+    left: 0,
     zIndex: 0,
   },
   seatProfileFrame: {
@@ -7079,10 +7084,9 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
   emptySeat: {
-    width: 62, height: 62, borderRadius: 31,
+    width: 88, height: 88, borderRadius: 44,
     backgroundColor: 'rgba(66,35,157,.34)',
     justifyContent: 'center', alignItems: 'center',
-    borderWidth: 1, borderColor: 'rgba(113,185,255,.55)',
   },
   emptySeatNum: { color: '#E9E5FF', fontSize: 11, marginTop: 1, fontWeight: '800' },
   seatNumTag: {
@@ -7787,6 +7791,113 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.85)',
     fontSize: 12,
     fontWeight: '600',
+  },
+  hostToolsTileEmoji: {
+    fontSize: 28,
+    lineHeight: 32,
+  },
+  slotModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.62)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  slotModalCard: {
+    width: '100%',
+    maxWidth: 340,
+    borderRadius: 24,
+    paddingHorizontal: 22,
+    paddingTop: 14,
+    paddingBottom: 22,
+    backgroundColor: BRAND.splashBg,
+    borderWidth: 1,
+    borderColor: 'rgba(56,189,248,0.55)',
+    alignItems: 'center',
+  },
+  slotModalTitle: {
+    color: '#FFF',
+    fontSize: 22,
+    fontWeight: '900',
+    textAlign: 'center',
+    marginTop: -4,
+  },
+  slotModalSubtitle: {
+    color: 'rgba(255,255,255,0.72)',
+    fontSize: 13,
+    lineHeight: 18,
+    textAlign: 'center',
+    marginTop: 8,
+    marginBottom: 18,
+  },
+  slotInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+  },
+  slotStepperBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  slotInput: {
+    width: 86,
+    height: 52,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(56,189,248,0.5)',
+    color: '#FFF',
+    fontSize: 24,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  slotRangeHint: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 11,
+    fontWeight: '700',
+    marginTop: 10,
+  },
+  slotModalActions: {
+    width: '100%',
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 20,
+  },
+  slotCancelBtn: {
+    flex: 1,
+    height: 44,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  slotCancelText: {
+    color: 'rgba(255,255,255,0.82)',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  slotSaveBtn: {
+    flex: 1,
+    height: 44,
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  slotSaveGradient: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  slotSaveText: {
+    color: '#FFF',
+    fontSize: 13,
+    fontWeight: '900',
   },
   sideBarBtn: {
     alignItems: 'center',

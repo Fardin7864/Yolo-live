@@ -58,6 +58,8 @@ const QUICK_ACTIONS = [
   { key: 'svip', title: 'SVIP', subtitle: 'Super privileges', meta: 'SVIP', colors: ['#4D1D95', '#8B2AE6', '#D97706'], glow: '#FCD34D', route: '/main/vip' },
 ];
 
+const PAGE_SIZE = 10;
+
 const formatCount = (value) => {
   const n = Number(value) || 0;
   return n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}K` : String(n);
@@ -235,9 +237,9 @@ function SectionHeader({ asset, title, onViewAll }) {
   );
 }
 
-function LiveStreamCard({ stream, onPress }) {
+function LiveStreamCard({ stream, onPress, style }) {
   return (
-    <TouchableOpacity activeOpacity={0.88} onPress={onPress} style={styles.liveCard}>
+    <TouchableOpacity activeOpacity={0.88} onPress={onPress} style={[styles.liveCard, style]}>
       <SafeImage uri={stream.coverUrl} style={styles.liveCover} />
       <LinearGradient colors={['transparent', 'rgba(4,5,28,.96)']} style={styles.liveShade} />
       <View style={styles.cardLivePill}><Text style={styles.cardLiveText}>LIVE</Text></View>
@@ -258,13 +260,13 @@ function LiveStreamCard({ stream, onPress }) {
   );
 }
 
-function NearbyHostCard({ host, index, onPress }) {
+function HostProfileCard({ host, index, onPress, nearby = false, style }) {
   const borderColors = ['#7E48FF', '#16C8E5', '#F339B2', '#683CFF'];
   return (
-    <TouchableOpacity activeOpacity={0.88} onPress={onPress} style={[styles.nearbyCard, { borderColor: borderColors[index % borderColors.length] }]}>
+    <TouchableOpacity activeOpacity={0.88} onPress={onPress} style={[styles.hostCard, { borderColor: borderColors[index % borderColors.length] }, style]}>
       <SafeImage uri={host.avatar_url} style={styles.nearbyImage} />
       <LinearGradient colors={['transparent', 'rgba(7,6,38,.97)']} style={styles.nearbyShade} />
-      <View style={styles.distancePill}><Text style={styles.distanceText}>{host.distance}</Text></View>
+      {nearby ? <View style={styles.distancePill}><Text style={styles.distanceText}>{host.distance}</Text></View> : null}
       <View style={styles.nearbyCopy}>
         <View style={styles.nearbyNameRow}>
           <Text style={styles.nearbyName} numberOfLines={1}>{host.full_name || 'Host'}</Text>
@@ -275,6 +277,24 @@ function NearbyHostCard({ host, index, onPress }) {
           <Text style={styles.pointsText}>{formatCount(host.points)}</Text>
         </View>
       </View>
+    </TouchableOpacity>
+  );
+}
+
+function TwoColumnGrid({ items, renderItem, style }) {
+  return (
+    <View style={[styles.twoColumnGrid, style]}>
+      {items.map((item, index) => renderItem(item, index))}
+    </View>
+  );
+}
+
+function ShowMoreButton({ loading, onPress }) {
+  return (
+    <TouchableOpacity activeOpacity={0.86} disabled={loading} onPress={onPress} style={styles.showMoreTouch}>
+      <LinearGradient colors={['#7247FF', '#E02BEF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.showMoreButton}>
+        {loading ? <LogoLoader size={24} /> : <Text style={styles.showMoreText}>Show more</Text>}
+      </LinearGradient>
     </TouchableOpacity>
   );
 }
@@ -336,12 +356,23 @@ export default function PremiumHomeScreen() {
   const { user, homeBanners } = useGlobalState();
   const [activeCategory, setActiveCategory] = useState('Trending');
   const [liveStreams, setLiveStreams] = useState([]);
+  const [liveHasMore, setLiveHasMore] = useState(false);
+  const [loadingMoreLive, setLoadingMoreLive] = useState(false);
+  const [hosts, setHosts] = useState([]);
   const [nearbyHosts, setNearbyHosts] = useState([]);
+  const [hostHasMore, setHostHasMore] = useState(false);
+  const [loadingMoreHosts, setLoadingMoreHosts] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const topBanners = (homeBanners || []).filter((b) => (b.position || 'top') === 'top' && b.is_active !== false);
   const eventBanners = (homeBanners || []).filter((b) => b.position === 'bottom' && b.is_active !== false);
+  const showNearby = activeCategory === 'Nearby';
+  const liveFirstPage = liveStreams.slice(0, 4);
+  const liveRest = liveStreams.slice(4);
+  const hostList = showNearby ? nearbyHosts : hosts;
+  const hostFirstPage = hostList.slice(0, 4);
+  const hostRest = hostList.slice(4);
 
   useEffect(() => {
     if (!user?.id) return undefined;
@@ -356,20 +387,23 @@ export default function PremiumHomeScreen() {
     return () => { supabase.removeChannel(channel); };
   }, [user?.id]);
 
-  const fetchLiveStreams = useCallback(async () => {
+  const fetchLiveStreams = useCallback(async ({ reset = false, offset = 0 } = {}) => {
     try { await supabase.rpc('cleanup_stale_live_streams'); } catch (_) {}
+    const pageOffset = reset ? 0 : offset;
     let query = supabase.from('live_streams')
       .select('id, broadcaster_id, type, title, tag, cover_url, current_viewers, peak_viewers, total_gifts, last_heartbeat_at, profiles:broadcaster_id(full_name, avatar_url, is_banned, country)')
       .eq('status', 'live')
       .gt('last_heartbeat_at', new Date(Date.now() - 90_000).toISOString())
       .order('current_viewers', { ascending: false })
       .order('total_gifts', { ascending: false })
-      .limit(30);
+      .range(pageOffset, pageOffset + PAGE_SIZE);
     if (activeCategory === 'Audio') query = query.eq('type', 'audio');
     else if (!['Trending', 'Nearby'].includes(activeCategory)) query = query.eq('tag', activeCategory);
     const { data, error } = await query;
     if (error) throw error;
-    setLiveStreams((data || []).filter((item) => !item.profiles?.is_banned).map((item) => ({
+    const rows = data || [];
+    setLiveHasMore(rows.length > PAGE_SIZE);
+    const nextStreams = rows.slice(0, PAGE_SIZE).filter((item) => !item.profiles?.is_banned).map((item) => ({
       id: item.broadcaster_id,
       streamId: item.id,
       title: item.title,
@@ -380,24 +414,54 @@ export default function PremiumHomeScreen() {
       tags: [item.tag, item.type === 'audio' ? 'Audio' : 'Live'].filter(Boolean),
       streamType: item.type,
       country: item.profiles?.country,
-    })));
+    }));
+    setLiveStreams((current) => reset ? nextStreams : [...current, ...nextStreams]);
   }, [activeCategory]);
 
-  const fetchNearbyHosts = useCallback(async () => {
-    let query = supabase.from('profiles').select('id, full_name, avatar_url, country, level').eq('is_banned', false).limit(12);
+  const fetchNearbyHosts = useCallback(async ({ reset = false, offset = 0 } = {}) => {
+    const pageOffset = reset ? 0 : offset;
+    let query = supabase.from('profiles')
+      .select('id, full_name, avatar_url, country, level')
+      .eq('is_banned', false)
+      .order('level', { ascending: false })
+      .range(pageOffset, pageOffset + PAGE_SIZE);
     if (user?.country) query = query.eq('country', user.country);
     if (user?.id) query = query.neq('id', user.id);
     const { data } = await query;
-    setNearbyHosts((data || []).map((host, index) => ({
+    const rows = data || [];
+    setHostHasMore(rows.length > PAGE_SIZE);
+    const nextHosts = rows.slice(0, PAGE_SIZE).map((host, index) => ({
       ...host,
-      distance: `${(0.2 + index * 0.2).toFixed(1)} km`,
+      distance: `${(0.2 + (pageOffset + index) * 0.2).toFixed(1)} km`,
       points: Math.max(120, Number(host.level || 1) * 210),
-    })));
+    }));
+    setNearbyHosts((current) => reset ? nextHosts : [...current, ...nextHosts]);
   }, [user?.country, user?.id]);
 
+  const fetchHosts = useCallback(async ({ reset = false, offset = 0 } = {}) => {
+    const pageOffset = reset ? 0 : offset;
+    let query = supabase.from('profiles')
+      .select('id, full_name, avatar_url, country, level')
+      .eq('is_banned', false)
+      .order('level', { ascending: false })
+      .range(pageOffset, pageOffset + PAGE_SIZE);
+    if (user?.id) query = query.neq('id', user.id);
+    const { data } = await query;
+    const rows = data || [];
+    setHostHasMore(rows.length > PAGE_SIZE);
+    const nextHosts = rows.slice(0, PAGE_SIZE).map((host) => ({
+      ...host,
+      points: Math.max(120, Number(host.level || 1) * 210),
+    }));
+    setHosts((current) => reset ? nextHosts : [...current, ...nextHosts]);
+  }, [user?.id]);
+
   const fetchAll = useCallback(async () => {
-    await Promise.all([fetchLiveStreams(), fetchNearbyHosts()]);
-  }, [fetchLiveStreams, fetchNearbyHosts]);
+    await Promise.all([
+      fetchLiveStreams({ reset: true }),
+      showNearby ? fetchNearbyHosts({ reset: true }) : fetchHosts({ reset: true }),
+    ]);
+  }, [fetchHosts, fetchLiveStreams, fetchNearbyHosts, showNearby]);
 
   useEffect(() => {
     setLoading(true);
@@ -408,7 +472,7 @@ export default function PremiumHomeScreen() {
   useEffect(() => { liveFetchRef.current = fetchLiveStreams; }, [fetchLiveStreams]);
   useEffect(() => {
     const channel = supabase.channel(`premium-home-live-${Date.now()}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'live_streams' }, () => liveFetchRef.current?.())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'live_streams' }, () => liveFetchRef.current?.({ reset: true }))
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, []);
@@ -417,6 +481,19 @@ export default function PremiumHomeScreen() {
     setRefreshing(true);
     await fetchAll();
     setRefreshing(false);
+  };
+
+  const loadMoreLive = async () => {
+    if (loadingMoreLive || !liveHasMore) return;
+    setLoadingMoreLive(true);
+    await fetchLiveStreams({ offset: liveStreams.length }).finally(() => setLoadingMoreLive(false));
+  };
+
+  const loadMoreHosts = async () => {
+    if (loadingMoreHosts || !hostHasMore) return;
+    setLoadingMoreHosts(true);
+    const loader = showNearby ? fetchNearbyHosts : fetchHosts;
+    await loader({ offset: hostList.length }).finally(() => setLoadingMoreHosts(false));
   };
 
   const openStream = (stream, index) => router.push({
@@ -460,14 +537,35 @@ export default function PremiumHomeScreen() {
         {loading ? (
           <View style={styles.loader}><LogoLoader size="small" /></View>
         ) : liveStreams.length ? (
-          <FlatList
-            horizontal
-            data={liveStreams}
-            keyExtractor={(item) => item.streamId}
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.horizontalRow}
-            renderItem={({ item, index }) => <LiveStreamCard stream={item} onPress={() => openStream(item, index)} />}
-          />
+          <>
+            <TwoColumnGrid
+              items={liveFirstPage}
+              renderItem={(item, index) => (
+                <LiveStreamCard
+                  key={item.streamId}
+                  stream={item}
+                  style={styles.gridCard}
+                  onPress={() => openStream(item, index)}
+                />
+              )}
+            />
+            {liveRest.length ? <ImageCarousel banners={eventBanners} width={width} onPress={openHero} compact reverseFallback /> : null}
+            {liveRest.length ? (
+              <TwoColumnGrid
+                items={liveRest}
+                style={styles.gridAfterCarousel}
+                renderItem={(item, index) => (
+                  <LiveStreamCard
+                    key={item.streamId}
+                    stream={item}
+                    style={styles.gridCard}
+                    onPress={() => openStream(item, index + 4)}
+                  />
+                )}
+              />
+            ) : null}
+            {liveHasMore ? <ShowMoreButton loading={loadingMoreLive} onPress={loadMoreLive} /> : null}
+          </>
         ) : (
           <EmptySection
             background={EMPTY_BACKGROUNDS.live}
@@ -479,27 +577,52 @@ export default function PremiumHomeScreen() {
           />
         )}
 
-        <SectionHeader asset={SECTION_ICONS.nearby} title="Nearby Hosts" onViewAll={() => router.push('/main/network')} />
-        {nearbyHosts.length ? (
-          <FlatList
-            horizontal
-            data={nearbyHosts}
-            keyExtractor={(item) => item.id}
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.horizontalRow}
-            renderItem={({ item, index }) => <NearbyHostCard host={item} index={index} onPress={() => router.push(`/main/user/${item.id}`)} />}
-          />
+        {!loading && (hostList.length ? (
+          <>
+            <TwoColumnGrid
+              items={liveStreams.length ? hostList : hostFirstPage}
+              style={styles.hostGridNoHeader}
+              renderItem={(item, index) => (
+                <HostProfileCard
+                  key={item.id}
+                  host={item}
+                  index={index}
+                  nearby={showNearby}
+                  style={styles.gridCard}
+                  onPress={() => router.push(`/main/user/${item.id}`)}
+                />
+              )}
+            />
+            {!liveStreams.length && hostFirstPage.length >= 4 ? (
+              <ImageCarousel banners={eventBanners} width={width} onPress={openHero} compact reverseFallback />
+            ) : null}
+            {!liveStreams.length && hostRest.length ? (
+              <TwoColumnGrid
+                items={hostRest}
+                style={styles.gridAfterCarousel}
+                renderItem={(item, index) => (
+                  <HostProfileCard
+                    key={item.id}
+                    host={item}
+                    index={index + 4}
+                    nearby={showNearby}
+                    style={styles.gridCard}
+                    onPress={() => router.push(`/main/user/${item.id}`)}
+                  />
+                )}
+              />
+            ) : null}
+            {hostHasMore ? <ShowMoreButton loading={loadingMoreHosts} onPress={loadMoreHosts} /> : null}
+          </>
         ) : (
           <EmptySection
-            background={EMPTY_BACKGROUNDS.nearby}
-            title="No nearby hosts"
-            subtitle="Try again later or explore other categories."
+            background={showNearby ? EMPTY_BACKGROUNDS.nearby : EMPTY_BACKGROUNDS.live}
+            title={showNearby ? 'No nearby hosts' : 'No hosts to show'}
+            subtitle={showNearby ? 'Try again later or explore other categories.' : 'Profiles will appear here when hosts are available.'}
             action="Explore"
             onPress={() => router.push('/main/(tabs)/explore')}
           />
-        )}
-
-        <ImageCarousel banners={eventBanners} width={width} onPress={openHero} compact reverseFallback />
+        ))}
 
         <SectionHeader asset={SECTION_ICONS.events} title="Top Events" onViewAll={() => router.push('/main/(tabs)/explore')} />
         {eventBanners.length ? (
@@ -614,6 +737,26 @@ const styles = StyleSheet.create({
   viewAll: { flexDirection: 'row', alignItems: 'center', paddingVertical: 4 },
   viewAllText: { color: '#AAA9CA', fontSize: 13 },
   horizontalRow: { paddingHorizontal: 16, gap: 10 },
+  twoColumnGrid: {
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    rowGap: 12,
+  },
+  gridCard: { width: '48.5%' },
+  gridAfterCarousel: { marginTop: 12 },
+  hostGridNoHeader: { marginTop: 18 },
+  showMoreTouch: { alignSelf: 'center', marginTop: 16, marginBottom: 2, borderRadius: 18, overflow: 'hidden' },
+  showMoreButton: {
+    minWidth: 132,
+    height: 38,
+    borderRadius: 18,
+    paddingHorizontal: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  showMoreText: { color: '#FFFFFF', fontSize: 13, fontWeight: '900' },
   loader: { height: 120, alignItems: 'center', justifyContent: 'center' },
   liveCard: {
     width: 148, height: 216, borderRadius: 18, overflow: 'hidden',
@@ -632,7 +775,7 @@ const styles = StyleSheet.create({
   hostName: { color: '#DCD9EE', fontSize: 10.5, maxWidth: 83 },
   tagPill: { alignSelf: 'flex-start', marginTop: 6, backgroundColor: 'rgba(115,84,167,.42)', borderRadius: 8, paddingHorizontal: 7, paddingVertical: 2 },
   tagText: { color: '#E5DDF7', fontSize: 9.5 },
-  nearbyCard: { width: 124, height: 170, borderRadius: 18, overflow: 'hidden', borderWidth: 1.3, backgroundColor: '#17113E' },
+  hostCard: { width: 124, height: 188, borderRadius: 18, overflow: 'hidden', borderWidth: 1.3, backgroundColor: '#17113E' },
   nearbyImage: { width: '100%', height: '100%' },
   nearbyShade: { ...StyleSheet.absoluteFillObject, top: '45%' },
   distancePill: { position: 'absolute', top: 7, left: 7, backgroundColor: 'rgba(9,7,40,.78)', borderRadius: 10, paddingHorizontal: 7, paddingVertical: 3 },
