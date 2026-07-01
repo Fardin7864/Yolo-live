@@ -19,6 +19,7 @@
       },
       "channel": "preview",
       "env": {
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "689476303209-28oabnqmd9toh7aia67jmm7e35h5atu9.apps.googleusercontent.com",
         "EXPO_PUBLIC_ROYAL_FEAST_URL": "https://html5-games-seven.vercel.app/"
       }
     },
