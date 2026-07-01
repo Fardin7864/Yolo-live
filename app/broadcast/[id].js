@@ -2011,6 +2011,12 @@ export default function BroadcastRoomScreen() {
     }
   };
 
+  const getAudioVisitors = () => {
+    if (!isAudio) return roomViewers;
+    const seatedIds = new Set(activeGuests.filter(Boolean).map(g => g.id));
+    return roomViewers.filter(v => v?.id && v.id !== stream.id && !seatedIds.has(v.id));
+  };
+
   const handleViewersClick = async () => {
     setShowViewersModal(true);
     // Pre-fetch which of the current viewers / guests this user is
@@ -3207,30 +3213,32 @@ export default function BroadcastRoomScreen() {
     </Modal>
   );
 
-  const renderViewersListModal = () => (
-    <Modal animationType="slide" transparent={true} visible={showViewersModal} onRequestClose={() => setShowViewersModal(false)}>
-      <View style={styles.giftModalOverlay}>
-        <View style={[styles.giftModalContent, { height: height * 0.65, paddingBottom: insets.bottom + 10 }]}>
-          <View style={styles.modalHandle} />
-          <View style={[styles.giftHeader, { borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)', paddingBottom: 15 }]}>
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <Text style={[styles.giftTitle, { color: '#FFF' }]}>Live Viewers</Text>
-              <View style={styles.viewerCountTag}>
-                <Text style={styles.viewerCountTagText}>{liveViewerCount}</Text>
+  const renderViewersListModal = () => {
+    const viewerList = isAudio ? getAudioVisitors() : roomViewers;
+    return (
+      <Modal animationType="slide" transparent={true} visible={showViewersModal} onRequestClose={() => setShowViewersModal(false)}>
+        <View style={styles.giftModalOverlay}>
+          <View style={[styles.giftModalContent, { height: height * 0.65, paddingBottom: insets.bottom + 10 }]}>
+            <View style={styles.modalHandle} />
+            <View style={[styles.giftHeader, { borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)', paddingBottom: 15 }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Text style={[styles.giftTitle, { color: '#FFF' }]}>{isAudio ? 'Visitors' : 'Live Viewers'}</Text>
+                <View style={styles.viewerCountTag}>
+                  <Text style={styles.viewerCountTagText}>{viewerList.length}</Text>
+                </View>
               </View>
+              <TouchableOpacity onPress={() => setShowViewersModal(false)}>
+                <Ionicons name="close-circle" size={26} color="rgba(255,255,255,0.4)" />
+              </TouchableOpacity>
             </View>
-            <TouchableOpacity onPress={() => setShowViewersModal(false)}>
-              <Ionicons name="close-circle" size={26} color="rgba(255,255,255,0.4)" />
-            </TouchableOpacity>
-          </View>
 
           <FlatList
-            data={roomViewers}
+            data={viewerList}
             keyExtractor={(item, idx) => item.id ?? String(idx)}
             contentContainerStyle={{ paddingHorizontal: 15, paddingTop: 10 }}
             ListEmptyComponent={
               <Text style={{ color: '#9CA3AF', textAlign: 'center', marginTop: 40 }}>
-                No viewers in the room yet.
+                {isAudio ? 'No visitors watching from outside the slots yet.' : 'No viewers in the room yet.'}
               </Text>
             }
             renderItem={({ item }) => (
@@ -3246,6 +3254,9 @@ export default function BroadcastRoomScreen() {
                       />
                     ) : (
                       <Image source={{ uri: item.avatar }} style={styles.viewerAvatarMini} />
+                    )}
+                    {profileFrameSourceFor(item) && (
+                      <Image source={profileFrameSourceFor(item)} style={styles.viewerProfileFrameMini} resizeMode="contain" pointerEvents="none" />
                     )}
                   </View>
                   <View style={{ marginLeft: 12 }}>
@@ -3265,6 +3276,7 @@ export default function BroadcastRoomScreen() {
                         <Text style={styles.levelBadgeText}>Lv.{item.level || 1}</Text>
                       </View>
                     </View>
+                    <Text style={styles.viewerIdText}>ID: {item.displayId || item.display_id || '—'}</Text>
                     {item.coins != null && (
                       <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
                         <Ionicons name="diamond" size={10} color="#FBBF24" />
@@ -3304,7 +3316,8 @@ export default function BroadcastRoomScreen() {
         </View>
       </View>
     </Modal>
-  );
+    );
+  };
 
   const renderViewerProfileModal = () => {
     if (!selectedViewer) return null;
@@ -3320,6 +3333,9 @@ export default function BroadcastRoomScreen() {
             <View style={styles.profileHeader}>
               <View style={styles.profileAvatarBox}>
                 <Image source={{ uri: selectedViewer.avatar }} style={styles.profileAvatarLarge} />
+                {profileFrameSourceFor(selectedViewer) && (
+                  <Image source={profileFrameSourceFor(selectedViewer)} style={styles.viewerProfileFrameLarge} resizeMode="contain" pointerEvents="none" />
+                )}
                 <View style={styles.levelRingGlow} />
                 <View style={styles.profileLevelBadge}>
                   <Text style={styles.profileLevelText}>Lv.{selectedViewer.level}</Text>
@@ -3619,6 +3635,8 @@ export default function BroadcastRoomScreen() {
   const renderTopActions = () => {
     if (isAudio) {
       const goalProgress = Math.min((earnings / liveGoal) * 100, 100);
+      const audioVisitors = getAudioVisitors();
+      const recentAudioVisitors = audioVisitors.slice(-5).reverse();
       const leaveAudioRoom = async () => {
         if (isHostView) {
           const ok = await confirmCuteAlert(
@@ -3639,6 +3657,26 @@ export default function BroadcastRoomScreen() {
               <Image source={AUDIO_BACK_BUTTON} style={styles.audioAssetIcon} resizeMode="contain" />
             </TouchableOpacity>
             <View style={styles.audioTopNavRight}>
+              {isHostView && audioVisitors.length > 0 && (
+                <View style={styles.audioVisitorStrip}>
+                  <TouchableOpacity style={styles.audioVisitorAvatars} onPress={handleViewersClick} activeOpacity={0.82}>
+                    {recentAudioVisitors.map((viewer, idx) => (
+                      <View
+                        key={viewer.id || `${idx}`}
+                        style={[
+                          styles.audioVisitorAvatarWrap,
+                          idx > 0 && { marginLeft: -10 },
+                        ]}
+                      >
+                        <Image source={{ uri: viewer.avatar }} style={styles.audioVisitorAvatar} />
+                      </View>
+                    ))}
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.audioVisitorCountBtn} onPress={handleViewersClick} activeOpacity={0.8}>
+                    <Text style={styles.audioVisitorCountText}>{audioVisitors.length}</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
               <TouchableOpacity style={styles.audioTrophyButton} onPress={() => setShowRankingSheet(true)}>
                 <Ionicons name="trophy" size={22} color="#FFD73A" />
               </TouchableOpacity>
@@ -6607,6 +6645,31 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   audioTopNavRight: { flexDirection: 'row', alignItems: 'center', gap: 9 },
+  audioVisitorStrip: { flexDirection: 'row', alignItems: 'center', marginRight: 1 },
+  audioVisitorAvatars: { flexDirection: 'row', alignItems: 'center' },
+  audioVisitorAvatarWrap: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.75)',
+    backgroundColor: '#180B67',
+  },
+  audioVisitorAvatar: { width: '100%', height: '100%', borderRadius: 14 },
+  audioVisitorCountBtn: {
+    minWidth: 28,
+    height: 28,
+    borderRadius: 14,
+    marginLeft: -5,
+    paddingHorizontal: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(217,222,230,0.86)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.95)',
+  },
+  audioVisitorCountText: { color: '#3A4050', fontSize: 11, fontWeight: '900' },
   audioAssetButton: { width: 46, height: 46, alignItems: 'center', justifyContent: 'center' },
   audioAssetIcon: { width: 46, height: 46 },
   audioTrophyButton: {
@@ -7431,8 +7494,10 @@ const styles = StyleSheet.create({
   viewerItemLeft: { flexDirection: 'row', alignItems: 'center' },
   viewerAvatarWrapper: { width: 44, height: 44, justifyContent: 'center', alignItems: 'center', overflow: 'visible' },
   viewerAvatarMini: { width: 44, height: 44, borderRadius: 22, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' },
+  viewerProfileFrameMini: { position: 'absolute', width: 68, height: 68, top: -12, left: -12, zIndex: 6 },
   vipBadgeSmall: { position: 'absolute', bottom: -2, right: -2, backgroundColor: '#A855F7', width: 16, height: 16, borderRadius: 8, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#000' },
   viewerNameText: { color: '#FFF', fontSize: 14, fontWeight: 'bold' },
+  viewerIdText: { color: 'rgba(255,255,255,0.45)', fontSize: 10, fontWeight: '600', marginTop: 3 },
   levelBadgeMini: { paddingHorizontal: 6, paddingVertical: 1, borderRadius: 6, marginLeft: 6 },
   levelBadgeText: { color: '#FFF', fontSize: 9, fontWeight: 'bold' },
   adminTagMini: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#A855F7', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 6, marginLeft: 6 },
@@ -7449,6 +7514,7 @@ const styles = StyleSheet.create({
   profileHeader: { alignItems: 'center', marginBottom: 20 },
   profileAvatarBox: { position: 'relative', marginBottom: 15 },
   profileAvatarLarge: { width: 100, height: 100, borderRadius: 50, borderWidth: 4, borderColor: BRAND.primary },
+  viewerProfileFrameLarge: { position: 'absolute', width: 152, height: 152, top: -26, left: -26, zIndex: 8 },
   levelRingGlow: { position: 'absolute', width: 110, height: 110, borderRadius: 55, borderWidth: 2, borderColor: 'rgba(255,46,126,0.3)', top: -5, left: -5 },
   profileLevelBadge: { position: 'absolute', bottom: -5, right: 0, backgroundColor: '#FBBF24', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10, borderWidth: 2, borderColor: BRAND.splashBg },
   profileLevelText: { color: '#FFF', fontSize: 10, fontWeight: 'bold' },
