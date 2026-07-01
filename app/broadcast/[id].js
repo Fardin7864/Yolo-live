@@ -11,6 +11,7 @@ import * as Linking from 'expo-linking';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Audio from 'expo-audio';
 import * as MediaLibrary from 'expo-media-library';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import LottieView from 'lottie-react-native';
 import VipAvatar from '../../src/components/VipAvatar';
 import { usePreventScreenCapture } from 'expo-screen-capture';
@@ -30,6 +31,8 @@ import { agoraUidFromId } from '../../src/api/agora';
 import { BRAND } from '../../src/theme/brand';
 
 const { width, height } = Dimensions.get('screen');
+const MALL_INTRO_MAX_HEIGHT = height * 0.8;
+const MALL_INTRO_WIDTH = Math.min(width * 0.92, MALL_INTRO_MAX_HEIGHT * 9 / 16);
 
 // ─────────────────────────────────────────────────────────────────────
 // Lucky Bag asset
@@ -56,6 +59,97 @@ const PROFILE_FRAME_ASSETS = {
   'angel-wing': require('../../assets/mall/frames/angel-wing.webp'),
   'royal-gold': require('../../assets/mall/frames/royal-gold.webp'),
 };
+const BUNDLED_INTRO_ASSETS = {
+  'football-cup.webp': require('../../assets/mall/intro/football-cup.webp'),
+  'football-cup.m4v': require('../../assets/mall/intro/football-cup.m4v'),
+  'blue-roses.webp': require('../../assets/mall/intro/blue-roses.webp'),
+  'blue-roses.m4v': require('../../assets/mall/intro/blue-roses.m4v'),
+};
+
+const mallIntroMediaSource = (url) => {
+  if (typeof url === 'number') return url;
+  if (url?.startsWith?.('bundled://')) return BUNDLED_INTRO_ASSETS[url.replace('bundled://', '')];
+  return url ? { uri: url } : null;
+};
+
+const configureIntroVideoPlayer = (instance) => {
+  instance.loop = false;
+  instance.muted = false;
+  instance.volume = 1;
+  // Intros are short, intentional foreground media. `doNotMix` forces the
+  // embedded MP4/AAC track to claim audio focus instead of rendering silently
+  // behind the live-room audio session on Android/dev-client builds.
+  instance.audioMixingMode = 'doNotMix';
+};
+
+function MallIntroOverlay({ intro, source, onDone }) {
+  const firstFrameStartedRef = useRef(false);
+  const player = useVideoPlayer(source, (instance) => {
+    configureIntroVideoPlayer(instance);
+  });
+
+  const playWithSound = useCallback(() => {
+    try {
+      configureIntroVideoPlayer(player);
+      player.replay();
+    } catch (e) {
+      if (__DEV__) console.warn('intro video replay:', e?.message || e);
+      try { player.play(); } catch (_) {}
+    }
+  }, [player]);
+
+  useEffect(() => {
+    let mounted = true;
+    Audio.setIsAudioActiveAsync?.(true).catch((e) => {
+      if (__DEV__) console.warn('intro audio active:', e?.message || e);
+    });
+    Audio.setAudioModeAsync({
+      playsInSilentMode: true,
+      shouldPlayInBackground: false,
+      interruptionMode: 'doNotMix',
+      interruptionModeAndroid: 'doNotMix',
+      allowsRecording: false,
+      allowsRecordingIOS: false,
+      shouldRouteThroughEarpiece: false,
+    }).catch((e) => {
+      if (__DEV__) console.warn('intro audio mode:', e?.message || e);
+    }).finally(() => {
+      if (mounted) playWithSound();
+    });
+    const retry = setTimeout(() => {
+      if (mounted) playWithSound();
+    }, 220);
+    const subscription = player.addListener('playToEnd', onDone);
+    const timer = setTimeout(onDone, 7000);
+    return () => {
+      mounted = false;
+      clearTimeout(retry);
+      subscription.remove();
+      clearTimeout(timer);
+      try { player.pause(); } catch (_) {}
+    };
+  }, [onDone, playWithSound, player]);
+
+  return (
+    <View style={styles.mallIntroOverlay} pointerEvents="none">
+      <VideoView
+        player={player}
+        style={styles.mallIntroVideo}
+        nativeControls={false}
+        contentFit="contain"
+        pointerEvents="none"
+        onFirstFrameRender={() => {
+          if (firstFrameStartedRef.current) return;
+          firstFrameStartedRef.current = true;
+          playWithSound();
+        }}
+      />
+      <View style={styles.mallIntroNamePill}>
+        <Text style={styles.mallIntroNameText} numberOfLines={1}>{intro?.name || 'Special entrance'}</Text>
+      </View>
+    </View>
+  );
+}
 
 // ─────────────────────────────────────────────────────────────────────
 // Gift grid responsive sizing
@@ -205,6 +299,11 @@ export default function BroadcastRoomScreen() {
   const [gameMenuState, setGameMenuState] = useState(null); // null, 'menu', 'fruit'
   const [activeGiftAnimation, setActiveGiftAnimation] = useState({ id: null, source: null, loop: false });
   const [activeGiftTab, setActiveGiftTab] = useState('Classic');
+  const [activeMallIntro, setActiveMallIntro] = useState(null);
+  const activeMallIntroSource = useMemo(
+    () => activeMallIntro ? mallIntroMediaSource(activeMallIntro.videoUrl || activeMallIntro.video_url) : null,
+    [activeMallIntro]
+  );
 
   // Combo & Floating Toast System
   const [combo, setCombo] = useState({ active: false, count: 0, giftId: null });
@@ -353,6 +452,7 @@ export default function BroadcastRoomScreen() {
   const recordingRef = useRef(null);
   const chatInputRef = useRef(null);
   const channelRef = useRef(null);
+  const userRef = useRef(user);
   // Cross-live notification channel — global broadcast that every live
   // room subscribes to. Notable events (≥500💎 gifts, lucky bag drops)
   // fan out to every other room's chat list so viewers can hop between
@@ -390,6 +490,28 @@ export default function BroadcastRoomScreen() {
   // layers might miss (server bug, Agora handshake failed, network
   // routed but realtime broken, etc).
   const joinTimeoutRef = useRef(null);
+
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
+
+  const broadcastMallIntroForUser = useCallback((introUser = userRef.current) => {
+    if (!channelRef.current || !introUser?.id || !introUser?.selectedMallIntro || !introUser?.selectedMallIntroVideoUrl) {
+      return;
+    }
+    channelRef.current.send({
+      type: 'broadcast',
+      event: 'mall_intro',
+      payload: {
+        id: introUser.id,
+        ts: Date.now(),
+        name: introUser.name || 'A viewer',
+        introId: introUser.selectedMallIntro,
+        videoUrl: introUser.selectedMallIntroVideoUrl,
+        thumbnailUrl: introUser.selectedMallIntroThumbnailUrl,
+      },
+    });
+  }, []);
 
   const SFX_ASSETS = {
     Clap: require('../../assets/audio/clap.mp3'),
@@ -1599,6 +1721,7 @@ export default function BroadcastRoomScreen() {
         if (payload.guestId === user?.id) {
           // Just go live on the seat — no popup.
           setCallRequestStatus('accepted');
+          broadcastMallIntroForUser(user);
         }
       })
       .on('broadcast', { event: 'seat_update' }, ({ payload }) => {
@@ -1655,6 +1778,15 @@ export default function BroadcastRoomScreen() {
           level: payload.level || 1,
           avatar: payload.avatar,
         });
+      })
+      .on('broadcast', { event: 'mall_intro' }, ({ payload }) => {
+        if (!payload?.id || !payload?.videoUrl) return;
+          setActiveMallIntro({
+            id: `${payload.id}-${payload.ts || Date.now()}`,
+            name: payload.name || 'Special entrance',
+            videoUrl: payload.videoUrl,
+            audioUrl: payload.audioUrl || payload.audio_url || null,
+          });
       })
       .on('broadcast', { event: 'room_state' }, ({ payload }) => {
         // Viewers/guests mirror the host's synced controls (title, goal,
@@ -4493,6 +4625,9 @@ export default function BroadcastRoomScreen() {
                               vipExpiresAt: user?.vipExpiresAt || null,
                               selectedProfileFrame: user?.selectedProfileFrame || null,
                               selectedProfileFrameUrl: user?.selectedProfileFrameUrl || null,
+                              selectedMallIntro: user?.selectedMallIntro || null,
+                              selectedMallIntroVideoUrl: user?.selectedMallIntroVideoUrl || null,
+                              selectedMallIntroThumbnailUrl: user?.selectedMallIntroThumbnailUrl || null,
                             }
                           });
                         }
@@ -4507,6 +4642,9 @@ export default function BroadcastRoomScreen() {
                           vipExpiresAt: user?.vipExpiresAt || null,
                           selectedProfileFrame: user?.selectedProfileFrame || null,
                           selectedProfileFrameUrl: user?.selectedProfileFrameUrl || null,
+                          selectedMallIntro: user?.selectedMallIntro || null,
+                          selectedMallIntroVideoUrl: user?.selectedMallIntroVideoUrl || null,
+                          selectedMallIntroThumbnailUrl: user?.selectedMallIntroThumbnailUrl || null,
                         };
                         const newSeats = activeGuests.map(g => (g && g.id === user?.id) ? null : g);
                         newSeats[seatIdx] = myUser;
@@ -4520,6 +4658,7 @@ export default function BroadcastRoomScreen() {
                             payload: { activeGuests: newSeats, audioSlotCount }
                           });
                         }
+                        broadcastMallIntroForUser(myUser);
                       }
                     } else {
                       setShowManageCalls(true);
@@ -6442,6 +6581,14 @@ export default function BroadcastRoomScreen() {
             />
           </View>
         )}
+        {activeMallIntro && activeMallIntroSource ? (
+          <MallIntroOverlay
+            key={activeMallIntro.id}
+            intro={activeMallIntro}
+            source={activeMallIntroSource}
+            onDone={() => setActiveMallIntro(null)}
+          />
+        ) : null}
 
         {/* Gift sender banner — rendered AFTER the gift animation so the
             sender's name sits ON TOP of the gift, not hidden behind it. */}
@@ -6599,6 +6746,33 @@ const styles = StyleSheet.create({
     pointerEvents: 'none',
   },
   lottiePlayer: { width: width * 0.95, height: height * 0.85 },
+  mallIntroOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 210,
+    elevation: 210,
+    backgroundColor: 'rgba(0,0,0,0.72)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mallIntroVideo: {
+    width: MALL_INTRO_WIDTH,
+    height: MALL_INTRO_MAX_HEIGHT,
+    maxHeight: height * 0.8,
+    borderRadius: 22,
+    overflow: 'hidden',
+  },
+  mallIntroNamePill: {
+    position: 'absolute',
+    bottom: Math.max(44, height * 0.1),
+    maxWidth: width * 0.82,
+    paddingHorizontal: 18,
+    paddingVertical: 8,
+    borderRadius: 18,
+    backgroundColor: 'rgba(9, 8, 34, 0.78)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.16)',
+  },
+  mallIntroNameText: { color: '#FFF', fontSize: 14, fontWeight: '900' },
 
   topActions: { position: 'absolute', left: 0, right: 0, flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 16, zIndex: 110, alignItems: 'flex-start' },
   // Left wrapper for the host bar. Uses flex so the bar can shrink

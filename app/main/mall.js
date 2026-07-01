@@ -1,13 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert, Animated, Image, ImageBackground, Modal, RefreshControl, ScrollView, StyleSheet,
-  Text, TouchableOpacity, View, useWindowDimensions,
+  Text, TextInput, TouchableOpacity, View, useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useVideoPlayer, VideoView } from 'expo-video';
+import * as Audio from 'expo-audio';
 import { useGlobalState } from '../../src/context/GlobalStateContext';
 import { supabase } from '../../src/api/supabase';
 import LogoLoader from '../../src/components/LogoLoader';
@@ -44,6 +45,15 @@ const mediaSource = (url) => {
   if (typeof url === 'number') return url;
   if (url?.startsWith?.('bundled://')) return BUNDLED_INTRO_ASSETS[url.replace('bundled://', '')];
   return url ? { uri: url } : null;
+};
+
+const configureIntroVideoPlayer = (instance) => {
+  instance.loop = false;
+  instance.muted = false;
+  instance.volume = 1;
+  // Admin uploads a single MP4. The embedded audio must play from the same
+  // video source, so force this short preview to claim media audio focus.
+  instance.audioMixingMode = 'doNotMix';
 };
 
 const FRAME_ITEMS = [
@@ -184,15 +194,51 @@ function FrameCard({ item, width, user, selected, onPress }) {
 }
 
 function AnimationPreview({ item, onClose }) {
-  const player = useVideoPlayer(mediaSource(item.video_url) || item.video, (instance) => {
-    instance.loop = false;
-    instance.play();
+  const introSource = useMemo(() => mediaSource(item.video_url) || item.video, [item]);
+  const firstFrameStartedRef = useRef(false);
+  const player = useVideoPlayer(introSource, (instance) => {
+    configureIntroVideoPlayer(instance);
   });
 
+  const playWithSound = useCallback(() => {
+    try {
+      configureIntroVideoPlayer(player);
+      player.replay();
+    } catch (e) {
+      if (__DEV__) console.warn('intro preview replay:', e?.message || e);
+      try { player.play(); } catch (_) {}
+    }
+  }, [player]);
+
   useEffect(() => {
+    let mounted = true;
+    Audio.setIsAudioActiveAsync?.(true).catch((e) => {
+      if (__DEV__) console.warn('intro preview audio active:', e?.message || e);
+    });
+    Audio.setAudioModeAsync({
+      playsInSilentMode: true,
+      shouldPlayInBackground: false,
+      interruptionMode: 'doNotMix',
+      interruptionModeAndroid: 'doNotMix',
+      allowsRecording: false,
+      allowsRecordingIOS: false,
+      shouldRouteThroughEarpiece: false,
+    }).catch((e) => {
+      if (__DEV__) console.warn('intro preview audio mode:', e?.message || e);
+    }).finally(() => {
+      if (mounted) playWithSound();
+    });
+    const retry = setTimeout(() => {
+      if (mounted) playWithSound();
+    }, 220);
     const subscription = player.addListener('playToEnd', onClose);
-    return () => subscription.remove();
-  }, [onClose, player]);
+    return () => {
+      mounted = false;
+      clearTimeout(retry);
+      subscription.remove();
+      try { player.pause(); } catch (_) {}
+    };
+  }, [onClose, playWithSound, player]);
 
   return (
     <Modal visible transparent animationType="fade" statusBarTranslucent onRequestClose={onClose}>
@@ -204,6 +250,11 @@ function AnimationPreview({ item, onClose }) {
             nativeControls={false}
             contentFit="contain"
             pointerEvents="none"
+            onFirstFrameRender={() => {
+              if (firstFrameStartedRef.current) return;
+              firstFrameStartedRef.current = true;
+              playWithSound();
+            }}
           />
         </TouchableOpacity>
       </View>
@@ -279,6 +330,10 @@ export default function MallScreen() {
   const [selectedIntro, setSelectedIntro] = useState(null);
   const [previewIntro, setPreviewIntro] = useState(null);
   const [availableIntros, setAvailableIntros] = useState(FALLBACK_INTRO_ITEMS);
+  const [buyingIntro, setBuyingIntro] = useState(false);
+  const [sendIntroTarget, setSendIntroTarget] = useState(null);
+  const [recipientDisplayId, setRecipientDisplayId] = useState('');
+  const [sendingIntro, setSendingIntro] = useState(false);
   const [selectedFrame, setSelectedFrame] = useState(FRAME_ITEMS[0]);
   const [availableFrames, setAvailableFrames] = useState(FRAME_ITEMS);
   const [buyingFrame, setBuyingFrame] = useState(false);
@@ -298,9 +353,17 @@ export default function MallScreen() {
     if (!error && Array.isArray(data)) {
       const nextIntros = data.length ? data : FALLBACK_INTRO_ITEMS;
       setAvailableIntros(nextIntros);
-      setSelectedIntro((current) => current ? (nextIntros.find((item) => item.id === current.id) || null) : current);
+      setSelectedIntro((current) => {
+        if (current) return nextIntros.find((item) => item.id === current.id) || null;
+        return nextIntros.find((item) => item.id === user?.selectedMallIntro) || nextIntros[0] || null;
+      });
     }
-  }, []);
+  }, [user?.selectedMallIntro]);
+
+  useEffect(() => {
+    const activeIntro = availableIntros.find((item) => item.id === user?.selectedMallIntro);
+    if (activeIntro) setSelectedIntro(activeIntro);
+  }, [availableIntros, user?.selectedMallIntro]);
 
   useEffect(() => {
     loadIntros();
@@ -402,6 +465,46 @@ export default function MallScreen() {
       return;
     }
     Alert.alert('Frame selected', `${selectedFrame.name} is now your permanent profile frame.`);
+  };
+
+  const buySelectedIntro = async () => {
+    if (!selectedIntro || buyingIntro) return;
+    setBuyingIntro(true);
+    const { data, error } = await supabase.rpc('purchase_mall_intro', { p_intro_id: selectedIntro.id });
+    if (!error && data?.success) await refreshUser();
+    setBuyingIntro(false);
+    if (error) {
+      Alert.alert('Purchase failed', error.message);
+      return;
+    }
+    Alert.alert('Intro selected', `${selectedIntro.name} will play when you join a live room.`);
+  };
+
+  const openSendIntro = (intro) => {
+    if (!intro) return;
+    setSendIntroTarget(intro);
+    setRecipientDisplayId('');
+  };
+
+  const sendSelectedIntro = async () => {
+    const displayId = Number(recipientDisplayId);
+    if (!sendIntroTarget || sendingIntro || !Number.isFinite(displayId)) {
+      Alert.alert('Recipient ID required', 'Enter the user ID shown on their profile.');
+      return;
+    }
+    setSendingIntro(true);
+    const { data, error } = await supabase.rpc('gift_mall_intro', {
+      p_intro_id: sendIntroTarget.id,
+      p_recipient_display_id: displayId,
+    });
+    if (!error && data?.success) await refreshUser();
+    setSendingIntro(false);
+    if (error) {
+      Alert.alert('Send failed', error.message);
+      return;
+    }
+    setSendIntroTarget(null);
+    Alert.alert('Intro sent', `${sendIntroTarget.name} was sent successfully.`);
   };
 
   const hasBottomActions = mode === 'mall' && (
@@ -559,8 +662,8 @@ export default function MallScreen() {
         {mode === 'mall' && category === 'Intro' && selectedIntro ? (
           <IntroActions
             item={selectedIntro}
-            onBuy={() => Alert.alert('Buy Prop', `${selectedIntro.name} is selected for ${formatNumber(selectedIntro.diamond_cost ?? selectedIntro.price)} diamonds. Purchasing will be enabled when the Store checkout is connected.`)}
-            onSend={() => Alert.alert('Send Prop', `${selectedIntro.name} is selected. Choose-a-friend gifting will be connected here.`)}
+            onBuy={buySelectedIntro}
+            onSend={() => openSendIntro(selectedIntro)}
           />
         ) : mode === 'mall' && category === 'Frame' && selectedFrame ? (
           <IntroActions
@@ -571,6 +674,34 @@ export default function MallScreen() {
         ) : null}
       </View>
       {previewIntro ? <AnimationPreview item={previewIntro} onClose={() => setPreviewIntro(null)} /> : null}
+      <Modal visible={!!sendIntroTarget} transparent animationType="fade" onRequestClose={() => setSendIntroTarget(null)}>
+        <View style={styles.sendIntroOverlay}>
+          <View style={styles.sendIntroCard}>
+            <Text style={styles.sendIntroTitle}>Send Intro</Text>
+            <Text style={styles.sendIntroSubtitle} numberOfLines={2}>
+              Send {sendIntroTarget?.name} to a user by profile ID.
+            </Text>
+            <TextInput
+              value={recipientDisplayId}
+              onChangeText={(text) => setRecipientDisplayId(text.replace(/[^0-9]/g, '').slice(0, 12))}
+              keyboardType="number-pad"
+              placeholder="Recipient ID"
+              placeholderTextColor="rgba(255,255,255,0.45)"
+              style={styles.sendIntroInput}
+            />
+            <View style={styles.sendIntroActions}>
+              <TouchableOpacity style={styles.sendIntroCancel} onPress={() => setSendIntroTarget(null)} disabled={sendingIntro}>
+                <Text style={styles.sendIntroCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.sendIntroSubmit, sendingIntro && { opacity: 0.55 }]} onPress={sendSelectedIntro} disabled={sendingIntro}>
+                <LinearGradient colors={['#6A43F5', '#12BCEB']} style={styles.sendIntroSubmitGradient}>
+                  <Text style={styles.sendIntroSubmitText}>{sendingIntro ? 'Sending…' : 'Send'}</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -653,6 +784,17 @@ const styles = StyleSheet.create({
   previewBackdrop: { flex: 1, backgroundColor: '#000000', alignItems: 'center', justifyContent: 'center' },
   previewTapArea: { width: '100%' },
   previewVideo: { width: '100%', aspectRatio: 9 / 16, backgroundColor: '#000000' },
+  sendIntroOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.72)', alignItems: 'center', justifyContent: 'center', padding: 22 },
+  sendIntroCard: { width: '100%', maxWidth: 360, borderRadius: 24, padding: 20, backgroundColor: '#111431', borderWidth: 1, borderColor: 'rgba(151,75,255,.45)' },
+  sendIntroTitle: { color: '#FFF', fontSize: 20, fontWeight: '900', textAlign: 'center' },
+  sendIntroSubtitle: { color: 'rgba(255,255,255,0.66)', fontSize: 12, textAlign: 'center', lineHeight: 17, marginTop: 8 },
+  sendIntroInput: { height: 50, borderRadius: 16, marginTop: 18, paddingHorizontal: 15, color: '#FFF', fontSize: 16, fontWeight: '800', backgroundColor: 'rgba(255,255,255,0.07)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)' },
+  sendIntroActions: { flexDirection: 'row', gap: 10, marginTop: 16 },
+  sendIntroCancel: { flex: 1, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.08)' },
+  sendIntroCancelText: { color: '#EDE9FF', fontSize: 14, fontWeight: '800' },
+  sendIntroSubmit: { flex: 1, height: 46, borderRadius: 23, overflow: 'hidden' },
+  sendIntroSubmitGradient: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  sendIntroSubmitText: { color: '#FFF', fontSize: 14, fontWeight: '900' },
   loader: { height: 350, alignItems: 'center', justifyContent: 'center' },
   emptyState: { minHeight: 410, paddingHorizontal: 35, alignItems: 'center', justifyContent: 'center' },
   emptyTitle: { color: '#FFFFFF', fontSize: 19, fontWeight: '800', marginTop: 14 },

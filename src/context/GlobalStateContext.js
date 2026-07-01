@@ -75,6 +75,10 @@ export const GlobalStateProvider = ({ children }) => {
           selectedProfileFrame: data.selected_profile_frame || null,
           selectedProfileFrameUrl: data.selected_profile_frame_url || null,
           ownedProfileFrames: Array.isArray(data.owned_profile_frames) ? data.owned_profile_frames : [],
+          selectedMallIntro: data.selected_mall_intro || null,
+          selectedMallIntroVideoUrl: data.selected_mall_intro_video_url || null,
+          selectedMallIntroThumbnailUrl: data.selected_mall_intro_thumbnail_url || null,
+          ownedMallIntros: Array.isArray(data.owned_mall_intros) ? data.owned_mall_intros : [],
           // Notification preferences (migration 55) — default to true if
           // the columns don't exist on a profile from before the
           // migration ran.
@@ -568,6 +572,18 @@ export const GlobalStateProvider = ({ children }) => {
             ownedProfileFrames: Array.isArray(n.owned_profile_frames)
               ? n.owned_profile_frames
               : prev.ownedProfileFrames,
+            selectedMallIntro: n.selected_mall_intro !== undefined
+              ? n.selected_mall_intro
+              : prev.selectedMallIntro,
+            selectedMallIntroVideoUrl: n.selected_mall_intro_video_url !== undefined
+              ? n.selected_mall_intro_video_url
+              : prev.selectedMallIntroVideoUrl,
+            selectedMallIntroThumbnailUrl: n.selected_mall_intro_thumbnail_url !== undefined
+              ? n.selected_mall_intro_thumbnail_url
+              : prev.selectedMallIntroThumbnailUrl,
+            ownedMallIntros: Array.isArray(n.owned_mall_intros)
+              ? n.owned_mall_intros
+              : prev.ownedMallIntros,
             // Keep level + EXP in lock-step with the server so the
             // "My Level" screen reflects the live trigger-driven update
             // the instant a gift is sent.
