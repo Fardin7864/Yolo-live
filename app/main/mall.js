@@ -416,10 +416,10 @@ export default function MallScreen() {
           <TouchableOpacity style={styles.headerCircle} onPress={() => router.back()}>
             <Ionicons name="chevron-back" size={25} color="#FFFFFF" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>{mode === 'props' ? 'My Props' : 'Mall'}</Text>
+          <Text style={styles.headerTitle}>{mode === 'props' ? 'My Props' : 'Store'}</Text>
           <TouchableOpacity style={styles.propsButton} onPress={mode === 'props' ? openMall : openProps}>
             <Ionicons name={mode === 'props' ? 'storefront-outline' : 'bag-handle-outline'} size={17} color="#FFFFFF" />
-            <Text style={styles.propsButtonText}>{mode === 'props' ? 'Mall' : 'My Props'}</Text>
+            <Text style={styles.propsButtonText}>{mode === 'props' ? 'Store' : 'My Props'}</Text>
           </TouchableOpacity>
         </View>
 
@@ -515,7 +515,7 @@ export default function MallScreen() {
                     key={item.id}
                     item={item}
                     width={cardWidth}
-                    onPress={() => Alert.alert(item.name, `${formatNumber(item.price)} diamonds for ${item.duration}. Purchasing will be available when the Mall catalog is connected.`)}
+                    onPress={() => Alert.alert(item.name, `${formatNumber(item.price)} diamonds for ${item.duration}. Purchasing will be available when the Store catalog is connected.`)}
                   />
                 ))}
               </View>
@@ -546,10 +546,10 @@ export default function MallScreen() {
             <View style={styles.emptyState}>
               <Ionicons name="bag-handle-outline" size={54} color="rgba(174,91,255,.45)" />
               <Text style={styles.emptyTitle}>No props yet</Text>
-              <Text style={styles.emptyCopy}>Explore the Mall and collect something uniquely yours.</Text>
+              <Text style={styles.emptyCopy}>Explore the Store and collect something uniquely yours.</Text>
               <TouchableOpacity onPress={openMall}>
                 <LinearGradient colors={['#275CFF', '#A229ED']} style={styles.exploreButton}>
-                  <Text style={styles.exploreButtonText}>Explore Mall</Text>
+                  <Text style={styles.exploreButtonText}>Explore Store</Text>
                 </LinearGradient>
               </TouchableOpacity>
             </View>
@@ -559,7 +559,7 @@ export default function MallScreen() {
         {mode === 'mall' && category === 'Intro' && selectedIntro ? (
           <IntroActions
             item={selectedIntro}
-            onBuy={() => Alert.alert('Buy Prop', `${selectedIntro.name} is selected for ${formatNumber(selectedIntro.diamond_cost ?? selectedIntro.price)} diamonds. Purchasing will be enabled when the Mall checkout is connected.`)}
+            onBuy={() => Alert.alert('Buy Prop', `${selectedIntro.name} is selected for ${formatNumber(selectedIntro.diamond_cost ?? selectedIntro.price)} diamonds. Purchasing will be enabled when the Store checkout is connected.`)}
             onSend={() => Alert.alert('Send Prop', `${selectedIntro.name} is selected. Choose-a-friend gifting will be connected here.`)}
           />
         ) : mode === 'mall' && category === 'Frame' && selectedFrame ? (

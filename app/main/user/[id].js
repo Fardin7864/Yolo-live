@@ -1,41 +1,77 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Image, TouchableOpacity, ScrollView, Dimensions } from 'react-native';
-import LogoLoader from '../../../src/components/LogoLoader';
+import {
+  ActivityIndicator,
+  Image,
+  ImageBackground,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import LogoLoader from '../../../src/components/LogoLoader';
 import { useGlobalState } from '../../../src/context/GlobalStateContext';
 import { supabase } from '../../../src/api/supabase';
-import { BRAND } from '../../../src/theme/brand';
+import { flagFor } from '../../../src/utils/countryFlag';
 
-const { width } = Dimensions.get('window');
+const PROFILE_ASSETS = {
+  background: require('../../../assets/public-profile/cosmic-background.webp'),
+  back: require('../../../assets/public-profile/back.png'),
+  menu: require('../../../assets/public-profile/menu.png'),
+};
 
-const isUuid = (s) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(s || ''));
+const isUuid = (value) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(value || ''));
+const formatCount = (value) => value >= 1000 ? `${(value / 1000).toFixed(1)}k` : String(value || 0);
+const formatJoined = (value) => {
+  if (!value) return '—';
+  return new Intl.DateTimeFormat('en', { month: 'short', year: 'numeric' }).format(new Date(value));
+};
+
+function NeonCard({ children, style, contentStyle }) {
+  return (
+    <LinearGradient
+      colors={['rgba(223,46,255,.95)', 'rgba(62,111,255,.8)', 'rgba(223,46,255,.95)']}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+      style={[styles.cardBorder, style]}
+    >
+      <View style={[styles.cardInner, contentStyle]}>{children}</View>
+    </LinearGradient>
+  );
+}
+
+function Stat({ icon, iconColor, value, label }) {
+  return (
+    <View style={styles.stat}>
+      <Ionicons name={icon} size={24} color={iconColor} />
+      <Text style={styles.statNumber}>{formatCount(value)}</Text>
+      <Text style={styles.statLabel}>{label}</Text>
+    </View>
+  );
+}
 
 export default function PublicProfileScreen() {
   const router = useRouter();
-  const { id } = useLocalSearchParams(); // UUID (from in-app nav) or display_id (from search)
+  const { id } = useLocalSearchParams();
   const { user, followUser, unfollowUser, isFollowing } = useGlobalState();
-
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [following, setFollowing] = useState(false);
   const [counts, setCounts] = useState({ followers: 0, followingCount: 0 });
   const [busy, setBusy] = useState(false);
-
-  // Track WHY profile is null so we can show "User not found" vs.
-  // "Network error" — old code rendered the same generic empty state
-  // for both, which made a flaky connection look like a missing user.
   const [loadError, setLoadError] = useState(null);
 
   const loadProfile = useCallback(async () => {
     if (!id) return;
     setLoading(true);
     setLoadError(null);
-    let q = supabase.from('profiles').select('*');
-    q = isUuid(id) ? q.eq('id', id) : q.eq('display_id', id);
-    const { data, error } = await q.maybeSingle();
+    let query = supabase.from('profiles').select('*');
+    query = isUuid(id) ? query.eq('id', id) : query.eq('display_id', id);
+    const { data, error } = await query.maybeSingle();
     if (error) {
       setLoadError(error.message || 'Could not load profile.');
       setProfile(null);
@@ -43,14 +79,13 @@ export default function PublicProfileScreen() {
       return;
     }
     setProfile(data || null);
-
     if (data?.id) {
-      const [followers, followingRes, amIFollowing] = await Promise.all([
+      const [followers, followingResult, amIFollowing] = await Promise.all([
         supabase.from('follows').select('id', { count: 'exact', head: true }).eq('following_id', data.id),
         supabase.from('follows').select('id', { count: 'exact', head: true }).eq('follower_id', data.id),
         isFollowing(data.id),
       ]);
-      setCounts({ followers: followers?.count || 0, followingCount: followingRes?.count || 0 });
+      setCounts({ followers: followers?.count || 0, followingCount: followingResult?.count || 0 });
       setFollowing(amIFollowing);
     }
     setLoading(false);
@@ -61,58 +96,38 @@ export default function PublicProfileScreen() {
   const toggleFollow = async () => {
     if (!profile?.id || busy) return;
     setBusy(true);
-    const ok = following ? await unfollowUser(profile.id) : await followUser(profile.id);
-    if (ok) {
-      setFollowing(!following);
-      setCounts((c) => ({ ...c, followers: Math.max(0, c.followers + (following ? -1 : 1)) }));
+    const success = following ? await unfollowUser(profile.id) : await followUser(profile.id);
+    if (success) {
+      setFollowing((current) => !current);
+      setCounts((current) => ({
+        ...current,
+        followers: Math.max(0, current.followers + (following ? -1 : 1)),
+      }));
     }
     setBusy(false);
   };
 
-  const isSelf = profile?.id && profile.id === user?.id;
-
   if (loading) {
     return (
-      <SafeAreaView style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]} edges={['top']}>
+      <View style={styles.loading}>
         <LogoLoader size="medium" />
-      </SafeAreaView>
+      </View>
     );
   }
 
   if (!profile) {
-    const networkFailed = !!loadError;
     return (
-      <SafeAreaView style={styles.container} edges={['top']}>
-        <View style={styles.topBar}>
-          <TouchableOpacity style={styles.iconBtn} onPress={() => router.back()}>
-            <Ionicons name="chevron-back" size={28} color="#FFFFFF" />
-          </TouchableOpacity>
-        </View>
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 }}>
-          <Ionicons
-            name={networkFailed ? 'cloud-offline-outline' : 'person-circle-outline'}
-            size={64}
-            color="#374151"
-          />
-          <Text style={{ color: '#9CA3AF', marginTop: 16, textAlign: 'center' }}>
-            {networkFailed ? 'Could not reach the server.' : 'User not found.'}
-          </Text>
-          {networkFailed && (
-            <TouchableOpacity
-              onPress={loadProfile}
-              style={{
-                marginTop: 20,
-                backgroundColor: BRAND.primary,
-                paddingHorizontal: 24,
-                paddingVertical: 10,
-                borderRadius: 999,
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 6,
-              }}
-            >
-              <Ionicons name="refresh" size={16} color="#FFF" />
-              <Text style={{ color: '#FFF', fontWeight: '700' }}>Try again</Text>
+      <SafeAreaView style={styles.empty}>
+        <TouchableOpacity style={styles.fallbackBack} onPress={() => router.back()}>
+          <Ionicons name="chevron-back" size={28} color="#fff" />
+        </TouchableOpacity>
+        <View style={styles.emptyCenter}>
+          <Ionicons name={loadError ? 'cloud-offline-outline' : 'person-circle-outline'} size={68} color="#7559ad" />
+          <Text style={styles.emptyText}>{loadError ? 'Could not reach the server.' : 'User not found.'}</Text>
+          {!!loadError && (
+            <TouchableOpacity onPress={loadProfile} style={styles.retry}>
+              <Ionicons name="refresh" size={17} color="#fff" />
+              <Text style={styles.retryText}>Try again</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -120,233 +135,184 @@ export default function PublicProfileScreen() {
     );
   }
 
-  const formatCount = (n) => (n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n));
-  const avatarUri = profile.avatar_url || `https://i.pravatar.cc/200?u=${profile.id}`;
+  const isSelf = profile.id === user?.id;
+  const avatarUri = profile.avatar_url || `https://i.pravatar.cc/400?u=${profile.id}`;
+  const countryFlag = flagFor(profile.country);
+  const visitors = profile.visitor_count ?? profile.visitors ?? 0;
+  const languages = profile.languages || profile.language || (profile.country === 'Bangladesh' ? 'বাংলা, English' : 'English');
+  const interests = [
+    ['chatbubbles', 'Chat', '#c65cff'],
+    ['musical-notes', 'Music', '#ff50c8'],
+    ['game-controller', 'Gaming', '#42c8ff'],
+    ['body', 'Dance', '#b961ff'],
+  ];
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+    <ImageBackground source={PROFILE_ASSETS.background} style={styles.background} resizeMode="cover">
+      <View style={styles.tint} />
+      <SafeAreaView style={styles.safe} edges={['top']}>
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          <View style={styles.topBar}>
+            <TouchableOpacity onPress={() => router.back()} activeOpacity={0.8}>
+              <Image source={PROFILE_ASSETS.back} style={styles.navImage} />
+            </TouchableOpacity>
+            <TouchableOpacity activeOpacity={0.8}>
+              <Image source={PROFILE_ASSETS.menu} style={styles.navImage} />
+            </TouchableOpacity>
+          </View>
 
-        <View style={styles.topBar}>
-          <TouchableOpacity style={styles.iconBtn} onPress={() => router.back()}>
-            <Ionicons name="chevron-back" size={28} color="#FFFFFF" />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.iconBtn}>
-            <Ionicons name="ellipsis-horizontal" size={24} color="#FFFFFF" />
-          </TouchableOpacity>
-        </View>
-
-        {/* Profile Info */}
-        <View style={styles.headerContainer}>
-          <Image source={{ uri: avatarUri }} style={styles.avatar} />
-
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6, flexWrap: 'wrap', justifyContent: 'center' }}>
-            <Text style={styles.userName}>{profile.full_name || 'User'}</Text>
+          <View style={styles.hero}>
             <LinearGradient
-              colors={['#F59E0B', '#FCD34D']}
-              style={styles.levelBadge}
-              start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+              colors={['#ff27e2', '#ff72ca', '#7258ff', '#23baff']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.avatarGlow}
             >
-              <Text style={styles.levelText}>Lv. {profile.level || 1}</Text>
+              <View style={styles.avatarShell}>
+                <Image source={{ uri: avatarUri }} style={styles.avatar} />
+              </View>
             </LinearGradient>
-            {(() => {
-              const exp = profile.vip_expires_at && new Date(profile.vip_expires_at);
-              const active = profile.vip_type && exp && exp.getTime() > Date.now();
-              if (!active) return null;
-              const themes = {
-                VIP:  { colors: ['#94A3B8', '#475569'], icon: 'star',             label: 'VIP'  },
-                SVIP: { colors: ['#F59E0B', '#B45309'], icon: 'shield-checkmark', label: 'SVIP' },
-                VVIP: { colors: ['#FF007A', '#5A46B5'], icon: 'diamond',          label: 'VVIP' },
-              };
-              const t = themes[profile.vip_type] || themes.VIP;
-              return (
+
+            <View style={styles.nameRow}>
+              <Text style={styles.userName}>♠ {profile.full_name || 'User'} ♠</Text>
+              <LinearGradient colors={['#ffd95b', '#ffb817']} style={styles.levelBadge}>
+                <Text style={styles.levelText}>Lv. {profile.level || 1}</Text>
+              </LinearGradient>
+            </View>
+            <LinearGradient colors={['transparent', '#b739ff', '#56a4ff', 'transparent']} style={styles.divider} />
+            <View style={styles.idRow}>
+              <Text style={styles.meta}>ID: {profile.display_id || '—'}</Text>
+              <View style={styles.metaDivider} />
+              <Text style={styles.meta}>{countryFlag ? `${countryFlag}  ` : ''}{profile.country || 'Global'}</Text>
+            </View>
+            <Text style={styles.bio}>{profile.bio || 'No bio yet.'}</Text>
+          </View>
+
+          <NeonCard style={styles.statsCard} contentStyle={styles.statsContent}>
+            <Stat icon="person" iconColor="#f05cff" value={counts.followers} label="Followers" />
+            <View style={styles.statDivider} />
+            <Stat icon="people" iconColor="#56afff" value={counts.followingCount} label="Following" />
+            <View style={styles.statDivider} />
+            <Stat icon="eye" iconColor="#a763ff" value={visitors} label="Visitors" />
+          </NeonCard>
+
+          <View style={styles.interests}>
+            {interests.map(([icon, label, color]) => (
+              <View key={label} style={[styles.interestPill, { borderColor: color, shadowColor: color }]}>
+                <Ionicons name={icon} size={19} color={color} />
+                <Text style={styles.interestText}>{label}</Text>
+              </View>
+            ))}
+          </View>
+
+          {!isSelf && (
+            <View style={styles.actions}>
+              <TouchableOpacity
+                style={styles.messageBorder}
+                onPress={() => router.push(`/main/chat/${profile.id}?name=${encodeURIComponent(profile.full_name || 'User')}`)}
+              >
+                <View style={styles.messageButton}>
+                  <Ionicons name="chatbubble-ellipses-outline" size={25} color="#fff" />
+                  <Text style={styles.actionText}>Message</Text>
+                </View>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={toggleFollow} disabled={busy} style={styles.followTouch}>
                 <LinearGradient
-                  colors={t.colors}
-                  style={[styles.levelBadge, { marginLeft: 6, flexDirection: 'row', alignItems: 'center', gap: 3 }]}
-                  start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+                  colors={following ? ['#594376', '#382b62'] : ['#ff0792', '#ff3c78', '#ff7429']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.followButton}
                 >
-                  <Ionicons name={t.icon} size={10} color="#FFF" />
-                  <Text style={[styles.levelText, { color: '#FFF' }]}>{t.label}</Text>
+                  {busy ? <ActivityIndicator color="#fff" /> : (
+                    <>
+                      <Ionicons name={following ? 'checkmark' : 'person-add'} size={23} color="#fff" />
+                      <Text style={styles.actionText}>{following ? 'Following' : 'Follow'}</Text>
+                    </>
+                  )}
                 </LinearGradient>
-              );
-            })()}
-          </View>
+              </TouchableOpacity>
+            </View>
+          )}
 
-          <View style={styles.idRow}>
-            <Text style={styles.userId}>ID: {profile.display_id || '—'}</Text>
-            {!!profile.country && (
-              <Text style={styles.country}>{profile.country}</Text>
-            )}
-          </View>
-
-          <Text style={styles.bio}>{profile.bio || 'No bio yet.'}</Text>
-        </View>
-
-        {/* Stats */}
-        <View style={styles.statsContainer}>
-          <View style={styles.statBox}>
-            <Text style={styles.statNumber}>{formatCount(counts.followers)}</Text>
-            <Text style={styles.statLabel}>Followers</Text>
-          </View>
-          <View style={styles.statDivider} />
-          <View style={styles.statBox}>
-            <Text style={styles.statNumber}>{formatCount(counts.followingCount)}</Text>
-            <Text style={styles.statLabel}>Following</Text>
-          </View>
-        </View>
-
-        {/* Action Buttons (hidden for own profile) */}
-        {!isSelf && (
-          <View style={styles.actionRow}>
-            <TouchableOpacity
-              style={styles.msgBtn}
-              onPress={() => router.push(`/main/chat/${profile.id}?name=${encodeURIComponent(profile.full_name || 'User')}`)}
-            >
-              <Ionicons name="chatbubble-ellipses-outline" size={20} color="#FFFFFF" style={{ marginRight: 6 }} />
-              <Text style={styles.msgBtnText}>Message</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.followBtn, following && { backgroundColor: '#374151' }]}
-              onPress={toggleFollow}
-              disabled={busy}
-            >
-              <Ionicons name={following ? 'checkmark' : 'person-add'} size={18} color="#FFFFFF" style={{ marginRight: 6 }} />
-              <Text style={styles.followBtnText}>{following ? 'Following' : 'Follow'}</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-      </ScrollView>
-    </SafeAreaView>
+          <NeonCard style={styles.aboutCard}>
+            <View style={styles.aboutTitle}>
+              <Ionicons name="person-outline" size={21} color="#fff" />
+              <Text style={styles.aboutTitleText}>About me</Text>
+            </View>
+            <View style={styles.aboutRule} />
+            <View style={styles.aboutRow}>
+              <Ionicons name="calendar-outline" size={21} color="#c9bfff" />
+              <Text style={styles.aboutLabel}>Joined</Text>
+              <Text style={styles.aboutValue}>{formatJoined(profile.created_at)}</Text>
+            </View>
+            <View style={styles.aboutRule} />
+            <View style={styles.aboutRow}>
+              <Ionicons name="location-outline" size={22} color="#c9bfff" />
+              <Text style={styles.aboutLabel}>Location</Text>
+              <Text style={styles.aboutValue}>{profile.country || 'Global'}</Text>
+            </View>
+            <View style={styles.aboutRule} />
+            <View style={styles.aboutRow}>
+              <Ionicons name="globe-outline" size={22} color="#c9bfff" />
+              <Text style={styles.aboutLabel}>Language</Text>
+              <Text style={styles.aboutValue}>{Array.isArray(languages) ? languages.join(', ') : languages}</Text>
+            </View>
+          </NeonCard>
+        </ScrollView>
+      </SafeAreaView>
+    </ImageBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#0E111E',
-  },
-  scrollContent: {
-    paddingBottom: 20,
-  },
-  topBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 12,
-  },
-  iconBtn: {
-    padding: 8,
-  },
-  headerContainer: {
-    alignItems: 'center',
-    marginBottom: 20,
-    marginTop: 10,
-  },
-  avatar: {
-    width: 110,
-    height: 110,
-    borderRadius: 55,
-    borderWidth: 3,
-    borderColor: '#F43F5E',
-    marginBottom: 16,
-  },
-  userName: {
-    color: '#FFFFFF',
-    fontSize: 24,
-    fontWeight: 'bold',
-  },
-  levelBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 12,
-    marginLeft: 8,
-  },
-  levelText: {
-    color: '#1E1B4B',
-    fontSize: 10,
-    fontWeight: '900',
-    fontStyle: 'italic',
-  },
-  idRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-    marginTop: 6,
-  },
-  userId: {
-    color: '#9CA3AF',
-    fontSize: 14,
-    marginRight: 8,
-  },
-  country: {
-    color: '#9CA3AF',
-    fontSize: 14,
-  },
-  bio: {
-    color: '#D1D5DB',
-    fontSize: 14,
-    marginTop: 8,
-  },
-  statsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 30,
-  },
-  statBox: {
-    alignItems: 'center',
-    width: 100,
-  },
-  statNumber: {
-    color: '#FFFFFF',
-    fontSize: 22,
-    fontWeight: 'bold',
-    marginBottom: 4,
-  },
-  statLabel: {
-    color: '#6B7280',
-    fontSize: 12,
-  },
-  statDivider: {
-    width: 1,
-    height: 24,
-    backgroundColor: '#374151',
-  },
-  actionRow: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    paddingHorizontal: 24,
-    gap: 16,
-  },
-  msgBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 14,
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: '#374151'
-  },
-  msgBtnText: {
-    color: '#FFFFFF',
-    fontWeight: 'bold',
-    fontSize: 16,
-  },
-  followBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    backgroundColor: '#F43F5E',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 14,
-    borderRadius: 24,
-  },
-  followBtnText: {
-    color: '#FFFFFF',
-    fontWeight: 'bold',
-    fontSize: 16,
-  }
+  background: { flex: 1, backgroundColor: '#06002b' },
+  tint: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(3,0,36,.12)' },
+  safe: { flex: 1 },
+  scrollContent: { paddingHorizontal: 22, paddingBottom: 42 },
+  loading: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#08002f' },
+  empty: { flex: 1, backgroundColor: '#08002f' },
+  fallbackBack: { padding: 20 },
+  emptyCenter: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
+  emptyText: { color: '#cfc5df', fontSize: 16, marginTop: 14 },
+  retry: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 20, borderRadius: 22, paddingHorizontal: 22, paddingVertical: 11, backgroundColor: '#a827de' },
+  retryText: { color: '#fff', fontWeight: '800' },
+  topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 },
+  navImage: { width: 52, height: 52 },
+  hero: { alignItems: 'center', marginTop: -2 },
+  avatarGlow: { width: 190, height: 190, borderRadius: 95, padding: 4, shadowColor: '#e42dff', shadowOpacity: .85, shadowRadius: 18, elevation: 18 },
+  avatarShell: { flex: 1, borderRadius: 91, padding: 3, backgroundColor: '#10062b' },
+  avatar: { width: '100%', height: '100%', borderRadius: 88, backgroundColor: '#12052e' },
+  nameRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 20, gap: 10 },
+  userName: { color: '#fff', fontSize: 27, fontWeight: '900', textShadowColor: 'rgba(91,51,255,.8)', textShadowRadius: 9 },
+  levelBadge: { borderRadius: 15, paddingVertical: 6, paddingHorizontal: 13, shadowColor: '#ffbf27', shadowOpacity: .55, shadowRadius: 8 },
+  levelText: { color: '#251200', fontWeight: '900', fontSize: 13 },
+  divider: { width: '58%', height: 2, marginTop: 13, marginBottom: 13 },
+  idRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
+  meta: { color: '#b7b1d2', fontSize: 14 },
+  metaDivider: { width: 1, height: 19, backgroundColor: '#aaa1c7', marginHorizontal: 13 },
+  bio: { color: '#f4efff', fontSize: 17, lineHeight: 25, textAlign: 'center', marginTop: 18, paddingHorizontal: 20 },
+  cardBorder: { padding: 1, borderRadius: 20, shadowColor: '#b726ff', shadowOpacity: .45, shadowRadius: 9 },
+  cardInner: { flex: 1, borderRadius: 19, backgroundColor: 'rgba(12,2,67,.88)' },
+  statsCard: { height: 112, marginTop: 24 },
+  statsContent: { flexDirection: 'row', alignItems: 'center' },
+  stat: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  statNumber: { color: '#fff', fontSize: 23, lineHeight: 29, fontWeight: '900' },
+  statLabel: { color: '#aaa1ca', fontSize: 13 },
+  statDivider: { width: 1, height: 62, backgroundColor: 'rgba(199,189,228,.4)' },
+  interests: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 16, paddingVertical: 10, paddingHorizontal: 8, borderRadius: 20, backgroundColor: 'rgba(10,1,58,.7)' },
+  interestPill: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, borderWidth: 1, borderRadius: 18, paddingVertical: 8, paddingHorizontal: 10, shadowOpacity: .45, shadowRadius: 7 },
+  interestText: { color: '#f8f5ff', fontSize: 13, fontWeight: '700' },
+  actions: { flexDirection: 'row', gap: 14, marginTop: 18 },
+  messageBorder: { flex: 1, borderWidth: 1.5, borderColor: '#8f55ff', borderRadius: 28, padding: 1, shadowColor: '#674eff', shadowOpacity: .6, shadowRadius: 9 },
+  messageButton: { minHeight: 56, borderRadius: 26, flexDirection: 'row', gap: 9, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(17,6,76,.92)' },
+  followTouch: { flex: 1, shadowColor: '#ff3c86', shadowOpacity: .6, shadowRadius: 11 },
+  followButton: { minHeight: 59, borderRadius: 29, flexDirection: 'row', gap: 9, alignItems: 'center', justifyContent: 'center' },
+  actionText: { color: '#fff', fontSize: 17, fontWeight: '900' },
+  aboutCard: { marginTop: 20, minHeight: 205 },
+  aboutTitle: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 18, paddingTop: 17, paddingBottom: 12 },
+  aboutTitleText: { color: '#fff', fontSize: 16, fontWeight: '900' },
+  aboutRule: { height: 1, backgroundColor: 'rgba(165,146,210,.18)', marginHorizontal: 17 },
+  aboutRow: { minHeight: 49, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 18 },
+  aboutLabel: { color: '#aaa1ca', fontSize: 14, marginLeft: 11 },
+  aboutValue: { flex: 1, textAlign: 'right', color: '#bdb5d5', fontSize: 14 },
 });

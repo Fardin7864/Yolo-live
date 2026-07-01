@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, Dimensions, Image, Share, Animated, Easing } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, Dimensions, Image, ImageBackground, Share, Animated, Easing } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -11,6 +11,9 @@ import { prewarmAgora, disposeWarmAgora } from '../../../src/api/agoraPrewarm';
 import { BRAND } from '../../../src/theme/brand';
 
 const { width, height } = Dimensions.get('window');
+const LIVE_BACKGROUND = require('../../../assets/live-setup/background.webp');
+const GO_LIVE_BUTTON = require('../../../assets/live-setup/go-live-button.webp');
+const CLOSE_BUTTON = require('../../../assets/live-setup/close-button.webp');
 
 export default function LiveSetupScreen() {
   const router = useRouter();
@@ -54,10 +57,16 @@ export default function LiveSetupScreen() {
   const liveFlashAnim = useRef(new Animated.Value(0)).current;
 
   const tags = ['Chat', 'Music', 'Gaming', 'Dance'];
+  const tagIcons = {
+    Chat: 'chatbubble-ellipses',
+    Music: 'musical-notes',
+    Gaming: 'game-controller',
+    Dance: 'body',
+  };
   const broadcastTypes = ['Video Live', 'Audio Live'];
 
   // Radar-ring pulse loop. Runs the whole time the countdown is on
-  // screen (3 → 2 → 1 → 0) so the rings feel like a continuous
+  // screen (5 → 4 → 3 → 2 → 1) so the rings feel like a continuous
   // breathing effect rather than restarting on each tick.
   useEffect(() => {
     if (countdown === null) return undefined;
@@ -88,7 +97,7 @@ export default function LiveSetupScreen() {
   }, [countdown !== null]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Pre-warm the live_streams DB row AND the Agora engine in parallel
-  // with the countdown. Both fire once at countdown=3 and run in the
+  // with the countdown. Both fire once at countdown=5 and run in the
   // background; the broadcast room adopts both when it mounts.
   //
   //   - live_streams row     ~200-400ms saved
@@ -97,7 +106,7 @@ export default function LiveSetupScreen() {
   // Combined, the "Going live" spinner that used to follow the
   // countdown now flashes for ~100ms (or skips entirely).
   useEffect(() => {
-    if (countdown !== 3 || !user?.id || prewarmedStreamIdRef.current) return;
+    if (countdown !== 5 || !user?.id || prewarmedStreamIdRef.current) return;
     (async () => {
       try {
         const newId = await startLiveStream(
@@ -220,7 +229,7 @@ export default function LiveSetupScreen() {
           return;
        }
      }
-    setCountdown(3);
+    setCountdown(5);
   };
 
   // Camera flip on this preview screen isn't meaningful (the actual camera
@@ -269,6 +278,8 @@ export default function LiveSetupScreen() {
     // Per-number tier palette + label. Reads as a building-anticipation
     // arc: cool cyan → warm amber → energetic pink → final victory glow.
     const STEPS = {
+      5: { colors: ['#7C3AED', '#2563EB'], glow: '#7C3AED', label: 'Setting the stage' },
+      4: { colors: ['#A855F7', '#4F46E5'], glow: '#A855F7', label: 'Preparing camera' },
       3: { colors: ['#22D3EE', '#0EA5E9'], glow: '#22D3EE', label: 'Get ready'   },
       2: { colors: ['#FB923C', '#F59E0B'], glow: '#FB923C', label: 'Almost there'},
       1: { colors: [BRAND.primary, BRAND.primaryAlt], glow: BRAND.primary, label: 'Going live'  },
@@ -308,49 +319,63 @@ export default function LiveSetupScreen() {
 
     return (
       <View style={styles.countdownOverlay} pointerEvents="none">
-        {/* Soft vignette gradient behind everything. Layered over the
-            backdrop colour so the splash is dramatic but not flat. */}
         <LinearGradient
-          colors={['rgba(10,5,30,0.55)', 'rgba(10,5,30,0.92)']}
+          colors={['rgba(7,3,34,0.72)', 'rgba(5,3,35,0.94)']}
           start={{ x: 0.5, y: 0 }} end={{ x: 0.5, y: 1 }}
           style={StyleSheet.absoluteFillObject}
         />
 
-        {/* Radar pulse rings — borderColor inherits the step's accent
-            so the rings shift hue per countdown tick along with the
-            central number. */}
-        <View style={styles.ringStage} pointerEvents="none">
-          <Animated.View style={[styles.pulseRing, { borderColor: step.glow }, makeRingStyle(ring1Anim)]} />
-          <Animated.View style={[styles.pulseRing, { borderColor: step.glow }, makeRingStyle(ring2Anim)]} />
-          <Animated.View style={[styles.pulseRing, { borderColor: step.glow }, makeRingStyle(ring3Anim)]} />
-        </View>
-
-        {/* Central digit. Shown only while the number is 1–3; on 0 we
-            swap to the LIVE! flash card below. */}
         {!showLiveFlash && (
-          <Animated.View
-            style={[
-              styles.countdownCircleNew,
-              { shadowColor: step.glow },
-              {
-                transform: [{ scale: numberScale }, { rotate: numberRotate }],
-                opacity: numberOpacity,
-              },
-            ]}
-          >
-            <LinearGradient
-              colors={step.colors}
-              start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-              style={styles.circleGradientNew}
-            >
-              <Text style={styles.countdownValueNew}>{countdown}</Text>
-            </LinearGradient>
-          </Animated.View>
+          <View style={styles.countdownCard}>
+            <View style={styles.countdownEyebrow}>
+              <View style={[styles.countdownLiveDot, { backgroundColor: step.glow }]} />
+              <Text style={styles.countdownEyebrowText}>PREPARING YOUR LIVE</Text>
+            </View>
+
+            <View style={styles.countdownStage}>
+              <View style={styles.ringStage} pointerEvents="none">
+                <Animated.View style={[styles.pulseRing, { borderColor: step.glow }, makeRingStyle(ring1Anim)]} />
+                <Animated.View style={[styles.pulseRing, { borderColor: step.glow }, makeRingStyle(ring2Anim)]} />
+                <Animated.View style={[styles.pulseRing, { borderColor: step.glow }, makeRingStyle(ring3Anim)]} />
+              </View>
+              <Animated.View
+                style={[
+                  styles.countdownCircleNew,
+                  { shadowColor: step.glow },
+                  {
+                    transform: [{ scale: numberScale }, { rotate: numberRotate }],
+                    opacity: numberOpacity,
+                  },
+                ]}
+              >
+                <LinearGradient
+                  colors={step.colors}
+                  start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+                  style={styles.circleGradientNew}
+                >
+                  <Text style={styles.countdownValueNew}>{countdown}</Text>
+                </LinearGradient>
+              </Animated.View>
+            </View>
+
+            <Animated.Text style={[styles.prepareTextNew, { opacity: numberOpacity }]}>
+              {step.label}
+            </Animated.Text>
+            <Text style={styles.countdownHint}>Camera, microphone and stream are warming up</Text>
+            <View style={styles.countdownProgress}>
+              {[5, 4, 3, 2, 1].map((value) => (
+                <View
+                  key={value}
+                  style={[
+                    styles.countdownProgressDot,
+                    value >= countdown && { backgroundColor: step.glow, borderColor: step.glow },
+                  ]}
+                />
+              ))}
+            </View>
+          </View>
         )}
 
-        {/* LIVE! finale — a pill that snaps in for ~600ms before the
-            router push to the broadcast room. Different shape from the
-            count digits so the user feels the transition. */}
         {showLiveFlash && (
           <Animated.View
             style={[
@@ -369,14 +394,6 @@ export default function LiveSetupScreen() {
             </LinearGradient>
           </Animated.View>
         )}
-
-        {/* Dynamic label — fades in/out with the number so it reads as
-            one cohesive moment. */}
-        {!showLiveFlash && (
-          <Animated.Text style={[styles.prepareTextNew, { opacity: numberOpacity }]}>
-            {step.label}
-          </Animated.Text>
-        )}
       </View>
     );
   };
@@ -384,36 +401,38 @@ export default function LiveSetupScreen() {
   return (
     <View style={styles.container}>
       {renderCountdown()}
-      <LinearGradient
-        colors={[BRAND.splashBg, '#2A1B45', BRAND.splashBg]}
-        start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }}
-        style={StyleSheet.absoluteFillObject}
-      />
-      {/* Soft pink glow blob behind the avatar — purely decorative */}
-      <View pointerEvents="none" style={styles.glowBlob} />
+      <Image source={LIVE_BACKGROUND} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+      <View pointerEvents="none" style={styles.backgroundShade} />
 
-      <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
-        {/* Top: just a close button on the right */}
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
         <View style={styles.headerMini}>
-          <TouchableOpacity style={styles.closeBtn} onPress={handleClose}>
-            <Ionicons name="close" size={22} color="#FFFFFF" />
+          <TouchableOpacity style={styles.closeBtn} onPress={handleClose} activeOpacity={0.8}>
+            <Image source={CLOSE_BUTTON} style={styles.closeAsset} resizeMode="contain" />
           </TouchableOpacity>
         </View>
 
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={{ flex: 1, justifyContent: 'space-between' }}
+          style={styles.liveContent}
         >
-          {/* Centre stack — avatar + title + tags */}
           <View style={styles.centerStack}>
-            <TouchableOpacity activeOpacity={0.85} onPress={handleCoverPress} style={styles.avatarRing}>
-              <Image
-                source={{ uri: user?.avatar || 'https://picsum.photos/seed/yolo/200/200' }}
-                style={styles.avatarImg}
-              />
-              <View style={styles.avatarEditPill}>
-                <Ionicons name="pencil" size={11} color="#FFF" />
-              </View>
+            <LinearGradient
+              colors={['#FF27EC', '#923CFF', '#20C9FF']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.avatarOuterRing}
+            >
+              <TouchableOpacity activeOpacity={0.85} onPress={handleCoverPress} style={styles.avatarRing}>
+                <Image
+                  source={{ uri: user?.avatar || 'https://picsum.photos/seed/yolo/300/300' }}
+                  style={styles.avatarImg}
+                />
+              </TouchableOpacity>
+            </LinearGradient>
+            <TouchableOpacity style={styles.avatarEditPill} onPress={handleCoverPress}>
+              <LinearGradient colors={['#D725EE', '#553CFF']} style={styles.avatarEditGradient}>
+                <Ionicons name="pencil" size={17} color="#FFF" />
+              </LinearGradient>
             </TouchableOpacity>
 
             <TextInput
@@ -435,6 +454,10 @@ export default function LiveSetupScreen() {
                     style={[styles.tagPill, active && styles.tagPillActive]}
                     onPress={() => setActiveTag(tag)}
                   >
+                    {active ? (
+                      <LinearGradient colors={['#9923FF', '#EE17DA']} style={StyleSheet.absoluteFillObject} />
+                    ) : null}
+                    <Ionicons name={tagIcons[tag]} size={17} color={active ? '#FFF' : '#C8C5E4'} />
                     <Text style={[styles.tagPillText, active && styles.tagPillTextActive]}>
                       {tag}
                     </Text>
@@ -444,9 +467,7 @@ export default function LiveSetupScreen() {
             </View>
           </View>
 
-          {/* Bottom: mode toggle, share, big button */}
           <View style={styles.bottomStack}>
-            {/* Segmented mode toggle */}
             <View style={styles.segWrap}>
               {broadcastTypes.map((type) => {
                 const active = broadcastType === type;
@@ -457,9 +478,17 @@ export default function LiveSetupScreen() {
                     activeOpacity={0.85}
                     onPress={() => setBroadcastType(type)}
                   >
+                    {active ? (
+                      <LinearGradient
+                        colors={['#EB1FDF', '#663CFF', '#169FFF']}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={styles.segActiveGradient}
+                      />
+                    ) : null}
                     <Ionicons
                       name={type === 'Audio Live' ? 'mic' : 'videocam'}
-                      size={14}
+                      size={22}
                       color={active ? '#FFF' : 'rgba(255,255,255,0.6)'}
                     />
                     <Text style={[styles.segText, active && styles.segTextActive]}>
@@ -470,37 +499,39 @@ export default function LiveSetupScreen() {
               })}
             </View>
 
-            {/* Share row — minimal */}
-            <View style={styles.shareRowNew}>
+            <View style={styles.sharePanel}>
               <Text style={styles.shareLabel}>Share</Text>
-              <TouchableOpacity style={styles.shareIcon} onPress={() => handleShare('Facebook')}>
-                <Ionicons name="logo-facebook" size={16} color="#1877F2" />
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.shareIcon} onPress={() => handleShare('WhatsApp')}>
-                <Ionicons name="logo-whatsapp" size={16} color="#25D366" />
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.shareIcon} onPress={() => handleShare('Twitter')}>
-                <Ionicons name="logo-twitter" size={16} color="#1DA1F2" />
-              </TouchableOpacity>
+              <View style={styles.shareIcons}>
+                <TouchableOpacity style={[styles.shareIcon, styles.facebookIcon]} onPress={handleShare}>
+                  <Ionicons name="logo-facebook" size={25} color="#2393FF" />
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.shareIcon, styles.whatsappIcon]} onPress={handleShare}>
+                  <Ionicons name="logo-whatsapp" size={25} color="#25E984" />
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.shareIcon, styles.twitterIcon]} onPress={handleShare}>
+                  <Ionicons name="logo-twitter" size={24} color="#29A9FF" />
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.shareIcon, styles.linkIcon]} onPress={handleShare}>
+                  <Ionicons name="link" size={25} color="#FFFFFF" />
+                </TouchableOpacity>
+              </View>
             </View>
 
-            {/* Go Live */}
             <TouchableOpacity
-              activeOpacity={0.9}
+              activeOpacity={0.88}
               style={styles.goLiveWrapperNew}
               onPress={handleStartLive}
               disabled={countdown !== null}
             >
-              <LinearGradient
-                colors={broadcastType === 'Audio Live' ? ['#A855F7', '#6B4EFF'] : [BRAND.primary, BRAND.primaryAlt]}
-                start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+              <ImageBackground
+                source={GO_LIVE_BUTTON}
+                resizeMode="stretch"
                 style={styles.goLiveBtnNew}
+                imageStyle={styles.goLiveImage}
               >
-                <Ionicons name="radio" size={16} color="#FFF" />
-                <Text style={styles.goLiveTextNew}>
-                  Go live
-                </Text>
-              </LinearGradient>
+                <Ionicons name="radio" size={25} color="#FFF" />
+                <Text style={styles.goLiveTextNew}>Go live</Text>
+              </ImageBackground>
             </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
@@ -510,140 +541,170 @@ export default function LiveSetupScreen() {
 }
 
 const styles = StyleSheet.create({
-  /* ── Minimal redesign ───────────────────────────────────────────── */
-  glowBlob: {
-    position: 'absolute',
-    top: height * 0.12,
-    left: width / 2 - 130,
-    width: 260, height: 260,
-    borderRadius: 130,
-    backgroundColor: `${BRAND.primary}2E`,
+  backgroundShade: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(4, 3, 42, 0.08)',
   },
   headerMini: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
-    paddingHorizontal: 16,
-    paddingTop: 6,
+    paddingHorizontal: 17,
+    height: 52,
   },
   closeBtn: {
-    width: 36, height: 36, borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.10)',
+    width: 52, height: 52,
     justifyContent: 'center', alignItems: 'center',
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
   },
+  closeAsset: { width: 52, height: 52 },
+  liveContent: { flex: 1, justifyContent: 'space-between' },
   centerStack: {
     alignItems: 'center',
-    paddingHorizontal: 28,
-    marginTop: 12,
+    paddingHorizontal: 18,
+    marginTop: -2,
+  },
+  avatarOuterRing: {
+    width: 140, height: 140, borderRadius: 70,
+    padding: 3,
+    shadowColor: '#E82CFF', shadowOpacity: 0.85,
+    shadowRadius: 18, shadowOffset: { width: 0, height: 0 },
+    elevation: 14,
+    marginBottom: 14,
   },
   avatarRing: {
-    width: 112, height: 112, borderRadius: 56,
-    borderWidth: 2, borderColor: BRAND.primary,
-    padding: 4,
-    backgroundColor: 'rgba(0,0,0,0.25)',
-    shadowColor: BRAND.primary, shadowOpacity: 0.5,
-    shadowRadius: 18, shadowOffset: { width: 0, height: 0 },
-    elevation: 12,
-    marginBottom: 22,
+    flex: 1,
+    borderRadius: 67,
+    padding: 7,
+    backgroundColor: '#140757',
   },
-  avatarImg: { width: '100%', height: '100%', borderRadius: 50 },
+  avatarImg: { width: '100%', height: '100%', borderRadius: 60, backgroundColor: '#1B0A64' },
   avatarEditPill: {
-    position: 'absolute', bottom: 0, right: 0,
-    width: 26, height: 26, borderRadius: 13,
-    backgroundColor: BRAND.primary,
+    position: 'absolute', top: 99, left: width / 2 + 38,
+    width: 42, height: 42, borderRadius: 21,
+    padding: 2,
+    backgroundColor: '#73D9FF',
     justifyContent: 'center', alignItems: 'center',
-    borderWidth: 2, borderColor: BRAND.splashBg,
+    elevation: 16,
+  },
+  avatarEditGradient: {
+    width: '100%', height: '100%', borderRadius: 19,
+    justifyContent: 'center', alignItems: 'center',
   },
   titleInputNew: {
     color: '#FFF',
-    fontSize: 18,
-    fontWeight: '600',
+    fontSize: 25,
+    fontWeight: '800',
     textAlign: 'center',
-    paddingVertical: 6,
-    minWidth: 200,
+    paddingVertical: 4,
+    minWidth: 230,
+    maxWidth: '90%',
   },
   titleUnderline: {
-    width: 80, height: 1.5, borderRadius: 1,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    marginBottom: 22,
+    width: 104, height: 3, borderRadius: 2,
+    backgroundColor: '#8C5DFF',
+    shadowColor: '#EE24FF', shadowOpacity: 1, shadowRadius: 6,
+    marginTop: 1, marginBottom: 16,
   },
   tagsRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
     justifyContent: 'center',
-    gap: 8,
+    gap: 7,
+    width: '100%',
   },
   tagPill: {
-    paddingHorizontal: 12, paddingVertical: 6,
-    borderRadius: 14,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.10)',
+    height: 40,
+    minWidth: 72,
+    maxWidth: 92,
+    flex: 1,
+    borderRadius: 20,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(14, 8, 71, 0.72)',
+    borderWidth: 1, borderColor: 'rgba(127, 78, 239, 0.68)',
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
   },
   tagPillActive: {
-    backgroundColor: `${BRAND.primary}2E`,
-    borderColor: BRAND.primary,
+    borderColor: '#FF55F2',
+    shadowColor: '#EF2CFF', shadowOpacity: 0.85, shadowRadius: 9,
+    elevation: 8,
   },
   tagPillText: {
-    color: 'rgba(255,255,255,0.75)',
-    fontSize: 12, fontWeight: '600',
+    color: '#D8D5ED',
+    fontSize: 13, fontWeight: '700',
   },
-  tagPillTextActive: { color: BRAND.primary },
+  tagPillTextActive: { color: '#FFFFFF' },
   bottomStack: {
-    paddingHorizontal: 24,
-    // Tab bar is absolutely-positioned (height 64 + ~16 bottom offset). The
-    // SafeAreaView already covers the system inset, so we just need to add
-    // the tab-bar height on top so the Go-Live button sits clearly above it.
-    paddingBottom: Platform.OS === 'ios' ? 110 : 96,
-    gap: 16,
+    paddingHorizontal: 22,
+    paddingBottom: 144,
+    gap: 13,
   },
   segWrap: {
     flexDirection: 'row',
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderRadius: 22,
+    width: '82%',
+    height: 54,
+    backgroundColor: 'rgba(14, 7, 72, 0.82)',
+    borderRadius: 27,
     padding: 4,
     alignSelf: 'center',
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1, borderColor: 'rgba(125, 67, 232, 0.55)',
   },
   segBtn: {
+    flex: 1,
     flexDirection: 'row', alignItems: 'center', gap: 6,
-    paddingHorizontal: 18, paddingVertical: 7,
-    borderRadius: 18,
+    justifyContent: 'center',
+    borderRadius: 23,
+    overflow: 'hidden',
   },
-  segBtnActive: { backgroundColor: `${BRAND.primary}2E` },
-  segText: { color: 'rgba(255,255,255,0.6)', fontWeight: '600', fontSize: 12 },
+  segBtnActive: {
+    shadowColor: '#F32CEC', shadowOpacity: 0.8,
+    shadowRadius: 10, elevation: 8,
+  },
+  segActiveGradient: { ...StyleSheet.absoluteFillObject, borderRadius: 23 },
+  segText: { color: 'rgba(255,255,255,0.65)', fontWeight: '700', fontSize: 16 },
   segTextActive: { color: '#FFF' },
-  shareRowNew: {
-    flexDirection: 'row',
+  sharePanel: {
     alignSelf: 'center',
+    width: '86%',
+    height: 94,
+    borderRadius: 18,
+    backgroundColor: 'rgba(10, 8, 70, 0.62)',
+    borderWidth: 1,
+    borderColor: '#663BEB',
     alignItems: 'center',
-    gap: 10,
+    justifyContent: 'center',
+    gap: 9,
   },
   shareLabel: {
-    color: 'rgba(255,255,255,0.5)',
-    fontSize: 11, fontWeight: '600',
-    marginRight: 4,
+    color: '#C9C4E0',
+    fontSize: 16, fontWeight: '700',
   },
+  shareIcons: { flexDirection: 'row', alignItems: 'center', gap: 14 },
   shareIcon: {
-    width: 28, height: 28, borderRadius: 14,
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    width: 42, height: 42, borderRadius: 21,
+    backgroundColor: '#11125D',
     justifyContent: 'center', alignItems: 'center',
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.10)',
+    borderWidth: 1.2,
+    shadowOpacity: 0.75, shadowRadius: 8, elevation: 7,
   },
+  facebookIcon: { borderColor: '#2B7AFF', shadowColor: '#2B7AFF' },
+  whatsappIcon: { borderColor: '#22D98A', shadowColor: '#22D98A' },
+  twitterIcon: { borderColor: '#248CFF', shadowColor: '#248CFF' },
+  linkIcon: { borderColor: '#B438FF', shadowColor: '#B438FF' },
   goLiveWrapperNew: {
-    height: 52,
-    borderRadius: 26,
-    shadowColor: BRAND.primary, shadowOpacity: 0.45,
-    shadowRadius: 16, shadowOffset: { width: 0, height: 6 },
-    elevation: 10,
+    height: 66,
+    borderRadius: 33,
+    shadowColor: '#E82DFF', shadowOpacity: 0.9,
+    shadowRadius: 18, shadowOffset: { width: 0, height: 5 },
+    elevation: 14,
   },
   goLiveBtnNew: {
     height: '100%',
+    width: '100%',
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 8,
-    borderRadius: 26,
+    gap: 12,
+    borderRadius: 33,
   },
+  goLiveImage: { borderRadius: 33 },
   goLiveTextNew: {
-    color: '#FFF', fontSize: 16, fontWeight: '700', letterSpacing: 0.3,
+    color: '#FFF', fontSize: 26, fontWeight: '800',
   },
 
   /* ── Legacy styles kept for back-compat ─────────────────────────── */
@@ -884,6 +945,50 @@ const styles = StyleSheet.create({
      Multi-ring radar pulse + larger central digit + per-tier glow +
      final "LIVE!" pill. Sized for portrait phones; clamped responsive
      so tablets don't get a comically huge number. */
+  countdownCard: {
+    width: Math.min(width - 42, 390),
+    paddingHorizontal: 24,
+    paddingTop: 22,
+    paddingBottom: 24,
+    borderRadius: 28,
+    backgroundColor: 'rgba(17, 9, 69, 0.88)',
+    borderWidth: 1,
+    borderColor: 'rgba(163, 83, 255, 0.62)',
+    alignItems: 'center',
+    shadowColor: '#8B3DFF',
+    shadowOpacity: 0.65,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 20,
+  },
+  countdownEyebrow: {
+    height: 30,
+    borderRadius: 15,
+    paddingHorizontal: 13,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.10)',
+  },
+  countdownLiveDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  countdownEyebrowText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 1.6,
+  },
+  countdownStage: {
+    width: 220,
+    height: 210,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   ringStage: {
     position: 'absolute',
     width: 220,
@@ -904,7 +1009,6 @@ const styles = StyleSheet.create({
     borderRadius: 60,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 32,
     shadowOpacity: 0.7,
     shadowRadius: 22,
     shadowOffset: { width: 0, height: 0 },
@@ -937,8 +1041,27 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 2.4,
     textTransform: 'uppercase',
-    marginTop: 12,
     opacity: 0.85,
+  },
+  countdownHint: {
+    color: 'rgba(224, 220, 246, 0.68)',
+    fontSize: 11,
+    lineHeight: 16,
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  countdownProgress: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 18,
+  },
+  countdownProgressDot: {
+    width: 26,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255,255,255,0.13)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
   },
   livePillWrap: {
     shadowOpacity: 0.8,

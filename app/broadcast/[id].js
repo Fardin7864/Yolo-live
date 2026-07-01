@@ -45,6 +45,17 @@ const { width, height } = Dimensions.get('screen');
 // looks like a sack (drawstring + body shading), so the feature ships
 // before the asset is in place.
 const LUCKY_BAG_IMAGE = null;
+const AUDIO_ROOM_BACKGROUND = require('../../assets/audio-room/redesign/cosmic-background.webp');
+const AUDIO_SEAT_FRAME = require('../../assets/audio-room/redesign/seat.webp');
+const AUDIO_BACK_BUTTON = require('../../assets/audio-room/redesign/back.webp');
+const AUDIO_MORE_BUTTON = require('../../assets/audio-room/redesign/more.webp');
+const AUDIO_SVIP_BADGE = require('../../assets/audio-room/redesign/svip.webp');
+const AUDIO_HOST_BANNER_BG = require('../../assets/audio-room/redesign/host-banner.png');
+const PROFILE_FRAME_ASSETS = {
+  'heart-fantasy': require('../../assets/mall/frames/heart-fantasy.webp'),
+  'angel-wing': require('../../assets/mall/frames/angel-wing.webp'),
+  'royal-gold': require('../../assets/mall/frames/royal-gold.webp'),
+};
 
 // ─────────────────────────────────────────────────────────────────────
 // Gift grid responsive sizing
@@ -224,6 +235,9 @@ export default function BroadcastRoomScreen() {
   // Latest seat layout, read by the (once-registered) presence handler
   const activeGuestsRef = useRef([]);
   const [activeGuests, setActiveGuests] = useState(new Array(7).fill(null)); // 7 guest seats (host occupies seat 1)
+  const [audioSlotCount, setAudioSlotCount] = useState(8); // total audio slots, including host seat
+  const [showSlotModal, setShowSlotModal] = useState(false);
+  const [slotInput, setSlotInput] = useState('8');
   const [pendingRequests, setPendingRequests] = useState([]); // Real-time requests will populate this
   const [isSeatsLocked, setIsSeatsLocked] = useState(false);
   const [lockedSeats, setLockedSeats] = useState([]); // per-seat lock (seat indices 0-6)
@@ -1050,6 +1064,8 @@ export default function BroadcastRoomScreen() {
           coverUrl: data.avatar_url || `https://picsum.photos/seed/${data.id}/400/600`,
           isVIP: data.is_vip || true,
           vipType: data.vip_type || 'VVIP',
+          selectedProfileFrame: data.selected_profile_frame || null,
+          selectedProfileFrameUrl: data.selected_profile_frame_url || null,
         });
       }
     } catch (err) {
@@ -1093,6 +1109,8 @@ export default function BroadcastRoomScreen() {
     coverUrl: user?.avatar || 'https://picsum.photos/seed/myprofile/100/100',
     isVIP: true,
     vipType: 'VVIP',
+    selectedProfileFrame: user?.selectedProfileFrame || null,
+    selectedProfileFrameUrl: user?.selectedProfileFrameUrl || null,
     streamType: type
   } : (broadcaster || {
     broadcasterName: 'Loading...',
@@ -1215,6 +1233,7 @@ export default function BroadcastRoomScreen() {
     goal: liveGoal,
     locked: isSeatsLocked,
     lockedSeats, // per-seat lock array (seat indices)
+    audioSlotCount,
     hostMuted: isSelfMuted,
     admins: roomAdmins,
     blockedUsers, // session-only block list (resets when host restarts the live)
@@ -1252,7 +1271,7 @@ export default function BroadcastRoomScreen() {
   // Re-broadcast whenever the host changes a synced control.
   useEffect(() => {
     if (isHostView) broadcastRoomState();
-  }, [isHostView, isSelfMuted, isSeatsLocked, lockedSeats, liveGoal, roomAdmins, blockedUsers]);
+  }, [isHostView, isSelfMuted, isSeatsLocked, lockedSeats, audioSlotCount, liveGoal, roomAdmins, blockedUsers]);
 
   // Sync mute state â†’ Agora mic
   useEffect(() => {
@@ -1575,18 +1594,24 @@ export default function BroadcastRoomScreen() {
         }
       })
       .on('broadcast', { event: 'call_accepted' }, ({ payload }) => {
-        setActiveGuests(payload.activeGuests);
+        if (typeof payload.audioSlotCount === 'number') setAudioSlotCount(payload.audioSlotCount);
+        setActiveGuests(resizeGuestSeats(payload.activeGuests, payload.audioSlotCount || audioSlotCount));
         if (payload.guestId === user?.id) {
           // Just go live on the seat — no popup.
           setCallRequestStatus('accepted');
         }
       })
       .on('broadcast', { event: 'seat_update' }, ({ payload }) => {
-        setActiveGuests(payload.activeGuests);
+        const nextSlotCount = typeof payload.audioSlotCount === 'number' ? payload.audioSlotCount : audioSlotCount;
+        if (typeof payload.audioSlotCount === 'number') {
+          setAudioSlotCount(nextSlotCount);
+          setSlotInput(String(nextSlotCount));
+        }
+        setActiveGuests(resizeGuestSeats(payload.activeGuests, nextSlotCount));
         // If I was on a seat and I'm no longer in the new layout, the host
         // kicked/blocked me â†’ drop back to audience and stop publishing.
         if (!isHostView && callStatusRef.current === 'accepted' &&
-          !payload.activeGuests.some(g => g && g.id === user?.id)) {
+          !resizeGuestSeats(payload.activeGuests, nextSlotCount).some(g => g && g.id === user?.id)) {
           setCallRequestStatus('idle');
           setIsSelfMuted(false);
           setForcedMuted(false);
@@ -1652,6 +1677,10 @@ export default function BroadcastRoomScreen() {
         if (Array.isArray(payload.lockedSeats)) setLockedSeats(payload.lockedSeats);
         setHostMuted(!!payload.hostMuted);
         if (Array.isArray(payload.admins)) setRoomAdmins(payload.admins);
+        if (typeof payload.audioSlotCount === 'number') {
+          setAudioSlotCount(payload.audioSlotCount);
+          setSlotInput(String(payload.audioSlotCount));
+        }
         // Adopt the host's current seat snapshot. This is the late-
         // joining viewer's only chance to see who's already on call
         // before the next seat_update event fires. Guarded so an
@@ -1659,7 +1688,7 @@ export default function BroadcastRoomScreen() {
         // having just claimed their seat) doesn't get overwritten by
         // a stale broadcast that hadn't yet rolled them in.
         if (Array.isArray(payload.activeGuests) && callStatusRef.current !== 'accepted') {
-          setActiveGuests(payload.activeGuests);
+          setActiveGuests(resizeGuestSeats(payload.activeGuests, payload.audioSlotCount || audioSlotCount));
         }
       })
       .on('broadcast', { event: 'seat_leave' }, ({ payload }) => {
@@ -1748,6 +1777,8 @@ export default function BroadcastRoomScreen() {
             isVIP: !!user?.vipType,
             vipType: user?.vipType || 'none',
             vipExpiresAt: user?.vipExpiresAt || null,
+            selectedProfileFrame: user?.selectedProfileFrame || null,
+            selectedProfileFrameUrl: user?.selectedProfileFrameUrl || null,
           });
 
           // Host publishes its current room state so anyone already here syncs.
@@ -2089,7 +2120,30 @@ export default function BroadcastRoomScreen() {
       channelRef.current.send({
         type: 'broadcast',
         event: 'seat_update',
-        payload: { activeGuests: next },
+        payload: { activeGuests: next, audioSlotCount },
+      });
+    }
+  };
+
+  const resizeGuestSeats = (seats, totalSlots) => {
+    const nextGuestSlots = Math.max(1, Math.min(11, Number(totalSlots) - 1));
+    const next = Array.isArray(seats) ? seats.slice(0, nextGuestSlots) : [];
+    while (next.length < nextGuestSlots) next.push(null);
+    return next;
+  };
+
+  const applyAudioSlotCount = (nextTotalSlots) => {
+    const normalized = Math.max(2, Math.min(12, Number(nextTotalSlots) || 8));
+    const resizedSeats = resizeGuestSeats(activeGuestsRef.current, normalized);
+    setAudioSlotCount(normalized);
+    setSlotInput(String(normalized));
+    setActiveGuests(resizedSeats);
+    setLockedSeats(prev => prev.filter(i => i < normalized - 1));
+    if (channelRef.current) {
+      channelRef.current.send({
+        type: 'broadcast',
+        event: 'seat_update',
+        payload: { activeGuests: resizedSeats, audioSlotCount: normalized },
       });
     }
   };
@@ -2511,10 +2565,19 @@ export default function BroadcastRoomScreen() {
   const renderLiveGoal = () => {
     const progress = Math.min((earnings / liveGoal) * 100, 100);
     return (
-      <View style={[styles.liveGoalContainer, { top: insets.top + (isHostView ? 105 : 60) }]}>
+      <View style={[
+        styles.liveGoalContainer,
+        isAudio && styles.audioLiveGoalContainer,
+        { top: insets.top + (isAudio ? 198 : (isHostView ? 105 : 60)) },
+      ]}>
         <View style={styles.liveGoalHeader}>
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <Text style={styles.liveGoalTitle}>Live Goal</Text>
+            {isAudio && (
+              <View style={styles.audioGoalIcon}>
+                <Ionicons name="flame" size={18} color="#FFD134" />
+              </View>
+            )}
+            <Text style={[styles.liveGoalTitle, isAudio && styles.audioGoalTitle]}>Live Goal</Text>
             {isHostView && (
               <TouchableOpacity
                 onPress={() => { setTempGoal(liveGoal.toString()); setShowGoalModal(true); }}
@@ -2524,8 +2587,11 @@ export default function BroadcastRoomScreen() {
               </TouchableOpacity>
             )}
           </View>
-          <Text style={styles.liveGoalStats}>{earnings}/{liveGoal}</Text>
+          <Text style={[styles.liveGoalStats, isAudio && styles.audioGoalStats]}>{earnings}/{liveGoal}</Text>
         </View>
+        {isAudio && (
+          <Text style={styles.audioGoalCompleted}>{Math.round(progress)}% Completed</Text>
+        )}
         <View style={styles.liveGoalBgBar}>
           <LinearGradient
             colors={['#FFD700', '#FFA500']}
@@ -3056,8 +3122,8 @@ export default function BroadcastRoomScreen() {
                       style={[styles.requestActionBtn, { backgroundColor: '#4ADE80' }]}
                       onPress={() => {
                         // Video live caps at 3 guests (4 on-screen with host).
-                        // Audio live keeps the full 8-seat grid.
-                        const maxGuests = isAudio ? 8 : 3;
+                        // Audio live uses the host-configured slot count.
+                        const maxGuests = isAudio ? activeGuests.length : 3;
                         const occupiedCount = activeGuests.filter(g => g !== null).length;
                         if (occupiedCount >= maxGuests) {
                           showCuteAlert('Seats Full', `Max ${maxGuests} guests allowed. Remove someone first.`);
@@ -3078,7 +3144,8 @@ export default function BroadcastRoomScreen() {
                               payload: {
                                 guestId: item.id,
                                 seatIdx: firstEmpty,
-                                activeGuests: newSeats
+                                activeGuests: newSeats,
+                                audioSlotCount,
                               }
                             });
                           }
@@ -3550,6 +3617,88 @@ export default function BroadcastRoomScreen() {
   );
 
   const renderTopActions = () => {
+    if (isAudio) {
+      const goalProgress = Math.min((earnings / liveGoal) * 100, 100);
+      const leaveAudioRoom = async () => {
+        if (isHostView) {
+          const ok = await confirmCuteAlert(
+            'End live?',
+            'This will end your stream now.',
+            { confirmText: 'End', cancelText: 'Cancel', destructive: true }
+          );
+          if (ok) await performEndLive();
+        } else {
+          router.back();
+        }
+      };
+
+      return (
+        <View style={[styles.audioTopShell, { top: insets.top + 8 }]}>
+          <View style={styles.audioTopNav}>
+            <TouchableOpacity style={styles.audioAssetButton} onPress={leaveAudioRoom}>
+              <Image source={AUDIO_BACK_BUTTON} style={styles.audioAssetIcon} resizeMode="contain" />
+            </TouchableOpacity>
+            <View style={styles.audioTopNavRight}>
+              <TouchableOpacity style={styles.audioTrophyButton} onPress={() => setShowRankingSheet(true)}>
+                <Ionicons name="trophy" size={22} color="#FFD73A" />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.audioAssetButton}
+                onPress={() => isHostView ? setShowHostMoreMenu(true) : handleViewersClick()}
+              >
+                <Image source={AUDIO_MORE_BUTTON} style={styles.audioAssetIcon} resizeMode="contain" />
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          <View style={styles.audioHostHero}>
+            <Image source={AUDIO_HOST_BANNER_BG} style={styles.audioHostHeroBg} resizeMode="cover" pointerEvents="none" />
+            <View style={styles.audioHeroTopLine}>
+              <Text style={styles.audioHeroName} numberOfLines={1}>{stream.broadcasterName || 'Host'}</Text>
+              <View style={styles.audioHeroViewer}>
+                <Ionicons name="eye" size={15} color="#FFF" />
+                <Text style={styles.audioHeroViewerText}>{liveViewerCount}</Text>
+              </View>
+              <View style={styles.audioHeroMeta}>
+                <Ionicons name="diamond" size={13} color="#F4C84A" />
+                <Text style={styles.audioHeroMetaText}>{urlTitle || 'Audio Live'}  •  {formatDuration(liveDuration)}</Text>
+              </View>
+            </View>
+
+            <View style={styles.audioHeroGoalRow}>
+              <View style={styles.audioHeroGoalTitleWrap}>
+                <View style={styles.audioHeroGoalIcon}>
+                  <Ionicons name="flame" size={15} color="#FFD134" />
+                </View>
+                <Text style={styles.audioHeroGoalTitle}>Live Goal</Text>
+                {isHostView && (
+                  <TouchableOpacity
+                    onPress={() => { setTempGoal(liveGoal.toString()); setShowGoalModal(true); }}
+                    style={styles.audioHeroGoalEdit}
+                  >
+                    <Ionicons name="pencil" size={13} color="rgba(255,255,255,0.72)" />
+                  </TouchableOpacity>
+                )}
+              </View>
+              <View style={styles.audioHeroGoalStatsWrap}>
+                <Text style={styles.audioHeroGoalStats}>{earnings}/{liveGoal}</Text>
+                <Text style={styles.audioHeroGoalCompleted}>{Math.round(goalProgress)}% Completed</Text>
+              </View>
+            </View>
+
+            <View style={styles.audioHeroGoalBarBg}>
+              <LinearGradient
+                colors={['#FFD700', '#FFA500']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={[styles.audioHeroGoalBarFill, { width: `${goalProgress}%` }]}
+              />
+            </View>
+          </View>
+        </View>
+      );
+    }
+
     // ── Responsive sizing for the top bar ─────────────────────────────
     // The old layout used a hard-coded marquee width and a fixed list of
     // 4 viewer avatars with 10px gaps. On small Androids the right-side
@@ -4114,6 +4263,24 @@ export default function BroadcastRoomScreen() {
     return VIP_SEAT_THEME[g.vipType] || null;
   };
 
+  const profileFrameSourceFor = (person) => {
+    const frameUrl = person?.selectedProfileFrameUrl || person?.profileFrameUrl || person?.frameUrl || null;
+    const frameId = person?.selectedProfileFrame || person?.profileFrame || null;
+    if (frameUrl) {
+      if (typeof frameUrl === 'string' && frameUrl.startsWith('bundled://')) {
+        return PROFILE_FRAME_ASSETS[frameUrl.replace('bundled://', '')] || null;
+      }
+      return { uri: frameUrl };
+    }
+    return frameId ? (PROFILE_FRAME_ASSETS[frameId] || null) : null;
+  };
+
+  const renderSeatProfileFrame = (person) => {
+    const source = profileFrameSourceFor(person);
+    if (!source) return null;
+    return <Image source={source} style={styles.seatProfileFrame} resizeMode="contain" pointerEvents="none" />;
+  };
+
   const renderAudioRoomSeats = () => {
     const hostMutedNow = isHostView ? isSelfMuted : hostMuted;
     const hostSpeaking = !hostMutedNow &&
@@ -4154,14 +4321,12 @@ export default function BroadcastRoomScreen() {
               resizeMode="cover"
             />
           </View>
+          {renderSeatProfileFrame(stream)}
           {hostMutedNow && (
             <View style={styles.muteIndicatorMini}>
               <Ionicons name="mic-off" size={10} color="#EF4444" />
             </View>
           )}
-          <View style={styles.seatNumTag}>
-            <Text style={styles.seatNumTagText}>1</Text>
-          </View>
         </View>
         <Text style={styles.seatName} numberOfLines={1}>{stream.broadcasterName}</Text>
         {renderEarningsBadge(stream.id)}
@@ -4206,6 +4371,7 @@ export default function BroadcastRoomScreen() {
                       ]}>
                         <Image source={{ uri: guest.avatar }} style={styles.seatAvatar} />
                       </View>
+                      {renderSeatProfileFrame(guest)}
                       {guestMuted && (
                         <View style={styles.muteIndicatorMini}>
                           <Ionicons name="mic-off" size={10} color="#EF4444" />
@@ -4224,9 +4390,6 @@ export default function BroadcastRoomScreen() {
                           <Text style={{ color: '#FFF', fontSize: 11, fontWeight: 'bold', lineHeight: 13 }}>♛</Text>
                         </View>
                       )}
-                      <View style={styles.seatNumTag}>
-                        <Text style={styles.seatNumTagText}>{displayNumber}</Text>
-                      </View>
                     </>
                   );
                 })()}
@@ -4290,6 +4453,8 @@ export default function BroadcastRoomScreen() {
                               avatar: user?.avatar || 'https://picsum.photos/seed/visitor/100/100',
                               vipType: user?.vipType || 'none',
                               vipExpiresAt: user?.vipExpiresAt || null,
+                              selectedProfileFrame: user?.selectedProfileFrame || null,
+                              selectedProfileFrameUrl: user?.selectedProfileFrameUrl || null,
                             }
                           });
                         }
@@ -4302,6 +4467,8 @@ export default function BroadcastRoomScreen() {
                           isVIP: !!user?.vipType,
                           vipType: user?.vipType || 'none',
                           vipExpiresAt: user?.vipExpiresAt || null,
+                          selectedProfileFrame: user?.selectedProfileFrame || null,
+                          selectedProfileFrameUrl: user?.selectedProfileFrameUrl || null,
                         };
                         const newSeats = activeGuests.map(g => (g && g.id === user?.id) ? null : g);
                         newSeats[seatIdx] = myUser;
@@ -4312,7 +4479,7 @@ export default function BroadcastRoomScreen() {
                           channelRef.current.send({
                             type: 'broadcast',
                             event: 'seat_update',
-                            payload: { activeGuests: newSeats }
+                            payload: { activeGuests: newSeats, audioSlotCount }
                           });
                         }
                       }
@@ -4321,6 +4488,7 @@ export default function BroadcastRoomScreen() {
                     }
                   }}
                 >
+                  <Image source={AUDIO_SEAT_FRAME} style={styles.neonSeatFrame} resizeMode="contain" pointerEvents="none" />
                   <Ionicons name={thisSeatLocked ? "lock-closed" : "person"} size={18} color={thisSeatLocked ? `${BRAND.primary}80` : "rgba(255,255,255,0.35)"} />
                   <Text style={styles.emptySeatNum}>{displayNumber}</Text>
                   {thisSeatLocked && !isHostView && (
@@ -4340,13 +4508,7 @@ export default function BroadcastRoomScreen() {
       <View style={styles.audioSeatsContainer}>
         <View style={styles.seatGrid}>
           {renderHostCell()}
-          {renderGuestCell(0)}
-          {renderGuestCell(1)}
-          {renderGuestCell(2)}
-          {renderGuestCell(3)}
-          {renderGuestCell(4)}
-          {renderGuestCell(5)}
-          {renderGuestCell(6)}
+          {activeGuests.map((_, idx) => renderGuestCell(idx))}
         </View>
       </View>
     );
@@ -4492,6 +4654,19 @@ export default function BroadcastRoomScreen() {
         show:   true,
       },
       {
+        key:    'slots',
+        label:  'Slots',
+        icon:   'grid-outline',
+        color:  '#38BDF8',
+        onPress: () => {
+          setSlotInput(String(audioSlotCount));
+          setShowHostMoreMenu(false);
+          setShowSlotModal(true);
+        },
+        active: audioSlotCount !== 8,
+        show:   isAudio,
+      },
+      {
         key:    'lock',
         label:  isSeatsLocked ? 'Locked' : 'Unlock',
         icon:   isSeatsLocked ? 'lock-closed' : 'lock-open-outline',
@@ -4535,6 +4710,65 @@ export default function BroadcastRoomScreen() {
               ))}
             </View>
           </View>
+        </TouchableOpacity>
+      </Modal>
+    );
+  };
+
+  const renderSlotSettingsModal = () => {
+    if (!isHostView || !isAudio) return null;
+    const currentSlots = Math.max(2, Math.min(12, Number(slotInput) || audioSlotCount));
+    return (
+      <Modal visible={showSlotModal} transparent animationType="fade" onRequestClose={() => setShowSlotModal(false)}>
+        <TouchableOpacity style={styles.slotModalOverlay} activeOpacity={1} onPress={() => setShowSlotModal(false)}>
+          <TouchableOpacity activeOpacity={1} style={styles.slotModalCard} onPress={() => {}}>
+            <View style={styles.modalHandle} />
+            <Text style={styles.slotModalTitle}>Audio Slots</Text>
+            <Text style={styles.slotModalSubtitle}>Set how many total seats this live stream should show, including the host seat.</Text>
+
+            <View style={styles.slotInputRow}>
+              <TouchableOpacity
+                style={styles.slotStepperBtn}
+                onPress={() => setSlotInput(String(Math.max(2, currentSlots - 1)))}
+              >
+                <Ionicons name="remove" size={20} color="#FFF" />
+              </TouchableOpacity>
+              <TextInput
+                value={slotInput}
+                onChangeText={(text) => setSlotInput(text.replace(/[^0-9]/g, '').slice(0, 2))}
+                keyboardType="number-pad"
+                style={styles.slotInput}
+                placeholder="8"
+                placeholderTextColor="rgba(255,255,255,0.35)"
+                selectTextOnFocus
+              />
+              <TouchableOpacity
+                style={styles.slotStepperBtn}
+                onPress={() => setSlotInput(String(Math.min(12, currentSlots + 1)))}
+              >
+                <Ionicons name="add" size={20} color="#FFF" />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.slotRangeHint}>Allowed: 2–12 total slots</Text>
+
+            <View style={styles.slotModalActions}>
+              <TouchableOpacity style={styles.slotCancelBtn} onPress={() => setShowSlotModal(false)}>
+                <Text style={styles.slotCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.slotSaveBtn}
+                onPress={() => {
+                  applyAudioSlotCount(currentSlots);
+                  setShowSlotModal(false);
+                }}
+              >
+                <LinearGradient colors={['#00C2FF', '#D92BFF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.slotSaveGradient}>
+                  <Text style={styles.slotSaveText}>Update</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
     );
@@ -5988,11 +6222,12 @@ export default function BroadcastRoomScreen() {
       {/* Layer 1: Core Interface & Specialized Backgrounds (Duo/Audio) */}
       <View style={styles.container} {...(!isHostView ? panResponder.panHandlers : {})}>
         {isAudio ? (
-          <LinearGradient
-            colors={[BRAND.splashBg, '#251B45', BRAND.splashBg]}
-            style={StyleSheet.absoluteFillObject}
-          >
-            <Image source={{ uri: stream.coverUrl }} style={styles.audioBackgroundBlur} blurRadius={90} opacity={0.3} />
+          <View style={StyleSheet.absoluteFillObject}>
+            <Image source={AUDIO_ROOM_BACKGROUND} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+            <LinearGradient
+              colors={['rgba(0,2,48,.10)', 'rgba(3,0,50,.05)', 'rgba(4,0,35,.28)']}
+              style={StyleSheet.absoluteFillObject}
+            />
             {/* Admin-curated room template (mig 88). Layered ABOVE the
                 blurred cover so it actually shows, but with the seat
                 grid + chat foreground sitting on top of it. resizeMode
@@ -6010,7 +6245,7 @@ export default function BroadcastRoomScreen() {
                 />
               );
             })()}
-          </LinearGradient>
+          </View>
         ) : (
           renderVideoLayout()
         )}
@@ -6053,9 +6288,9 @@ export default function BroadcastRoomScreen() {
           )}
           {renderRoomTitle()}
           {renderVideoSideBar()}
-          {renderLiveGoal()}
+          {!isAudio && renderLiveGoal()}
           {isAudio ? (
-            <View style={[styles.middleSectionAudio, { paddingTop: insets.top + (isHostView ? 150 : 105) }]}>
+            <View style={[styles.middleSectionAudio, { paddingTop: insets.top + 190 }]}>
               {renderAudioRoomSeats()}
             </View>
           ) : (
@@ -6089,6 +6324,8 @@ export default function BroadcastRoomScreen() {
                             avatar: user?.avatar || 'https://picsum.photos/seed/visitor/100/100',
                             vipType: user?.vipType || 'none',
                             vipExpiresAt: user?.vipExpiresAt || null,
+                            selectedProfileFrame: user?.selectedProfileFrame || null,
+                            selectedProfileFrameUrl: user?.selectedProfileFrameUrl || null,
                             videoEnabled: isVideoMode,
                           },
                         });
@@ -6195,6 +6432,7 @@ export default function BroadcastRoomScreen() {
         {renderBeautySheet()}
         {renderHostToolsSheet()}
         {renderHostMoreMenu()}
+        {renderSlotSettingsModal()}
         {/* Audio room background picker — host-only, audio-only. The
             sheet itself enforces the same gates, but rendering only
             when relevant keeps the modal tree tidy. */}
@@ -6356,6 +6594,136 @@ const styles = StyleSheet.create({
   topViewerAvatar: { width: 36, height: 36, borderRadius: 18, borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)' },
   topViewerCount: { width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', marginLeft: 4, zIndex: 150, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' },
   rankingChip: { width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(251,191,36,0.15)', justifyContent: 'center', alignItems: 'center', marginLeft: 4, zIndex: 150, borderWidth: 1, borderColor: 'rgba(251,191,36,0.5)' },
+  audioTopShell: {
+    position: 'absolute',
+    left: 20,
+    right: 20,
+    zIndex: 120,
+  },
+  audioTopNav: {
+    height: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  audioTopNavRight: { flexDirection: 'row', alignItems: 'center', gap: 9 },
+  audioAssetButton: { width: 46, height: 46, alignItems: 'center', justifyContent: 'center' },
+  audioAssetIcon: { width: 46, height: 46 },
+  audioTrophyButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(65, 23, 111, 0.82)',
+    borderWidth: 1.2,
+    borderColor: '#FFAE37',
+    shadowColor: '#FFAE37',
+    shadowOpacity: 0.65,
+    shadowRadius: 9,
+    elevation: 9,
+  },
+  audioHostHero: {
+    width: '100%',
+    minHeight: 76,
+    marginTop: 16,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingTop: 9,
+    paddingBottom: 9,
+    backgroundColor: 'rgba(12, 8, 77, 0.2)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(120, 206, 255, 0.85)',
+    shadowColor: '#B832FF',
+    shadowOpacity: 0.55,
+    shadowRadius: 14,
+    elevation: 10,
+    overflow: 'hidden',
+  },
+  audioHostHeroBg: {
+    ...StyleSheet.absoluteFillObject,
+    width: '100%',
+    height: '100%',
+    borderRadius: 14,
+    opacity: 0.98,
+  },
+  audioHeroAvatarWrap: {
+    width: 82,
+    height: 82,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  audioHeroFrame: { position: 'absolute', width: 92, height: 92 },
+  audioHeroAvatar: { width: 62, height: 62, borderRadius: 31, backgroundColor: '#180B67' },
+  audioHeroBadge: { position: 'absolute', width: 30, height: 30, left: -2, bottom: 0 },
+  audioOnlineDot: {
+    position: 'absolute', right: 2, bottom: 6,
+    width: 12, height: 12, borderRadius: 6,
+    backgroundColor: '#22E681', borderWidth: 2, borderColor: '#21105B',
+  },
+  audioHeroCopy: { flex: 1, marginLeft: 13, minWidth: 0 },
+  audioHeroTopLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 7,
+  },
+  audioHeroName: { flex: 1, minWidth: 0, color: '#FFF', fontSize: 15, fontWeight: '900' },
+  audioHeroViewer: {
+    paddingHorizontal: 7,
+    height: 19,
+    borderRadius: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: 'rgba(4, 4, 49, 0.72)',
+  },
+  audioHeroViewerText: { color: '#FFF', fontSize: 11, fontWeight: '700' },
+  audioHeroMeta: {
+    flexShrink: 1,
+    paddingHorizontal: 7,
+    height: 21,
+    borderRadius: 11,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: 'rgba(24, 13, 95, 0.86)',
+    borderWidth: 1,
+    borderColor: '#318DFF',
+  },
+  audioHeroMetaText: { color: '#FFF', fontSize: 9, fontWeight: '700' },
+  audioHeroGoalRow: {
+    marginTop: 7,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  audioHeroGoalTitleWrap: { flexDirection: 'row', alignItems: 'center', minWidth: 0 },
+  audioHeroGoalIcon: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    marginRight: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,105,27,.18)',
+    borderWidth: 1,
+    borderColor: '#FF7838',
+  },
+  audioHeroGoalTitle: { color: '#FFF', fontSize: 12, fontWeight: '900' },
+  audioHeroGoalEdit: { marginLeft: 6, padding: 2 },
+  audioHeroGoalStatsWrap: { alignItems: 'flex-end' },
+  audioHeroGoalStats: { color: '#FBBF24', fontSize: 13, fontWeight: '900' },
+  audioHeroGoalCompleted: { color: '#D8D2FF', fontSize: 8, fontWeight: '700', marginTop: -2 },
+  audioHeroGoalBarBg: {
+    height: 6,
+    marginTop: 5,
+    borderRadius: 4,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
+  audioHeroGoalBarFill: { height: '100%', borderRadius: 5 },
   // Legacy lucky bag styles — still referenced by older render paths.
   // The new countdown-banner + random-position bag tile use the
   // *Pending/Tile/Sack/Winners* groups below.
@@ -6420,18 +6788,48 @@ const styles = StyleSheet.create({
   middleSectionAudio: { justifyContent: 'flex-start' },
   middleSectionVideo: { flex: 1 },
 
-  audioSeatsContainer: { alignItems: 'center', paddingHorizontal: 12 },
-  seatGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', width: '100%' },
-  seatSlot: { width: (width - 32) / 4, alignItems: 'center', marginBottom: isSmallScreen ? 14 : 20 },
+  audioSeatsContainer: { alignItems: 'center', paddingHorizontal: 8 },
+  seatGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', width: '100%', paddingTop: 8 },
+  seatSlot: { width: (width - 16) / 4, alignItems: 'center', marginBottom: isSmallScreen ? 20 : 27 },
   occupiedSeat: { alignItems: 'center' },
-  seatAvatar: { width: 56, height: 56, borderRadius: 28, backgroundColor: '#1E1A34' },
+  seatAvatar: { width: 58, height: 58, borderRadius: 29, backgroundColor: '#17095F' },
   seatAvatarRing: {
-    width: 60, height: 60, borderRadius: 30,
-    borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.25)',
+    width: 62, height: 62, borderRadius: 31,
+    borderWidth: 1.5, borderColor: 'rgba(117,202,255,.8)',
     justifyContent: 'center', alignItems: 'center',
+    backgroundColor: 'rgba(45,17,135,.34)',
   },
-  seatAvatarRingHost: { borderColor: BRAND.primary, borderWidth: 2 },
-  seatName: { color: 'rgba(255,255,255,0.85)', fontSize: 11, marginTop: 6, maxWidth: (width - 32) / 4 - 4, textAlign: 'center' },
+  seatAvatarRingHost: { borderColor: '#41D9FF', borderWidth: 2 },
+  neonSeatFrame: {
+    position: 'absolute',
+    width: 88,
+    height: 88,
+    top: -13,
+    left: -13,
+    zIndex: 0,
+  },
+  seatProfileFrame: {
+    position: 'absolute',
+    width: 96,
+    height: 96,
+    top: -17,
+    left: -17,
+    zIndex: 8,
+  },
+  seatName: {
+    color: '#FFF',
+    fontSize: 10,
+    fontWeight: '800',
+    marginTop: 9,
+    minWidth: 72,
+    maxWidth: (width - 16) / 4 - 6,
+    textAlign: 'center',
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 10,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(21,8,91,.88)',
+  },
   // Per-seat "💎 1.2k" earnings pill. Width is tracked to the seat
   // column so a 1.5M reading from a top gifter doesn't overflow into
   // the adjacent seat. Subtle gold tint to read as "value" without
@@ -6457,12 +6855,12 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
   emptySeat: {
-    width: 60, height: 60, borderRadius: 30,
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    width: 62, height: 62, borderRadius: 31,
+    backgroundColor: 'rgba(66,35,157,.34)',
     justifyContent: 'center', alignItems: 'center',
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)',
+    borderWidth: 1, borderColor: 'rgba(113,185,255,.55)',
   },
-  emptySeatNum: { color: 'rgba(255,255,255,0.55)', fontSize: 10, marginTop: 1, fontWeight: '600' },
+  emptySeatNum: { color: '#E9E5FF', fontSize: 11, marginTop: 1, fontWeight: '800' },
   seatNumTag: {
     position: 'absolute', top: -2, left: -2,
     backgroundColor: '#38BDF8',
@@ -6481,8 +6879,8 @@ const styles = StyleSheet.create({
 
   /* Pulse & Speaker Styles */
   pulseContainer: { ...StyleSheet.absoluteFillObject, justifyContent: 'center', alignItems: 'center', zIndex: -1 },
-  pulseCircle: { position: 'absolute', width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(56,189,248,0.4)', borderWidth: 1, borderColor: '#38BDF8' },
-  avatarWrapper: { width: 60, height: 60, justifyContent: 'center', alignItems: 'center' },
+  pulseCircle: { position: 'absolute', width: 70, height: 70, borderRadius: 35, backgroundColor: 'rgba(40,207,255,.3)', borderWidth: 1, borderColor: '#38D9FF' },
+  avatarWrapper: { width: 62, height: 62, justifyContent: 'center', alignItems: 'center' },
   avatarRingSmall: { padding: 2, borderRadius: 32, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' },
   speakingRing: { borderColor: '#38BDF8', borderWidth: 2, shadowColor: '#38BDF8', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.8, shadowRadius: 5 },
 
@@ -6727,9 +7125,26 @@ const styles = StyleSheet.create({
   pendingTagText: { color: '#FFF', fontSize: 9, fontWeight: 'bold' },
 
   /* Host Control Bar Styles */
-  hostControlBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 12, backgroundColor: 'rgba(0,0,0,0.8)', borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.1)' },
-  hostControlLeft: { flexDirection: 'row', alignItems: 'center', gap: 15 },
-  hostActionBtn: { alignItems: 'center', opacity: 0.8 },
+  hostControlBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginHorizontal: 14,
+    marginBottom: 8,
+    paddingHorizontal: 8,
+    paddingTop: 11,
+    minHeight: 78,
+    borderRadius: 24,
+    backgroundColor: 'rgba(8, 8, 55, 0.94)',
+    borderWidth: 1,
+    borderColor: 'rgba(84, 89, 224, 0.65)',
+    shadowColor: '#703CFF',
+    shadowOpacity: 0.45,
+    shadowRadius: 12,
+    elevation: 12,
+  },
+  hostControlLeft: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around' },
+  hostActionBtn: { minWidth: 42, alignItems: 'center', opacity: 0.92 },
   // Small purple dot on top-right of the Background icon when a template
   // is applied — lets the host see at a glance that the room has a
   // custom theme without having to open the picker.
@@ -6739,8 +7154,41 @@ const styles = StyleSheet.create({
     backgroundColor: '#A855F7',
     borderWidth: 1.5, borderColor: BRAND.splashBg,
   },
-  hostActionText: { color: '#FFF', fontSize: 9, marginTop: 4, fontWeight: '500' },
-  chatToggleBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center' },
+  hostActionText: { color: '#D8D5F0', fontSize: 9, marginTop: 4, fontWeight: '600' },
+  chatToggleBtn: {
+    width: 44, height: 44, borderRadius: 22,
+    backgroundColor: 'rgba(87, 37, 177, 0.75)',
+    justifyContent: 'center', alignItems: 'center',
+    borderWidth: 1.2, borderColor: '#A94BFF',
+  },
+  audioInviteCard: {
+    position: 'absolute',
+    right: 18,
+    bottom: 104,
+    width: Math.min(width * 0.47, 210),
+    minHeight: 72,
+    zIndex: 95,
+    borderRadius: 18,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    backgroundColor: 'rgba(49, 12, 103, 0.92)',
+    borderWidth: 1.2,
+    borderColor: '#C03AFF',
+    shadowColor: '#A02CFF',
+    shadowOpacity: 0.65,
+    shadowRadius: 12,
+    elevation: 12,
+  },
+  audioInviteIcon: {
+    width: 38, height: 38, borderRadius: 19,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(77, 42, 180, 0.72)',
+  },
+  audioInviteTitle: { color: '#FFF', fontSize: 13, fontWeight: '800' },
+  audioInviteText: { color: '#E5DDF7', fontSize: 9, lineHeight: 13, marginTop: 2 },
   hostStatsRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 },
   earningsBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.5)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(251,191,36,0.3)' },
   earningsText: { color: '#FBBF24', fontSize: 11, fontWeight: 'bold', marginLeft: 4 },
@@ -6875,9 +7323,46 @@ const styles = StyleSheet.create({
 
   /* Live Goal Styles */
   liveGoalContainer: { position: 'absolute', left: 16, width: 160, zIndex: 35 },
+  audioLiveGoalContainer: {
+    left: 16,
+    right: 16,
+    width: 'auto',
+    minHeight: 76,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderRadius: 18,
+    backgroundColor: 'rgba(15,7,83,.82)',
+    borderWidth: 1,
+    borderColor: '#345DFF',
+    shadowColor: '#D92BFF',
+    shadowOpacity: 0.55,
+    shadowRadius: 12,
+    elevation: 10,
+  },
+  audioGoalIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    marginRight: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,105,27,.18)',
+    borderWidth: 1,
+    borderColor: '#FF7838',
+  },
+  audioGoalCompleted: {
+    position: 'absolute',
+    right: 18,
+    top: 38,
+    color: '#D8D2FF',
+    fontSize: 10,
+    fontWeight: '600',
+  },
   liveGoalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
   liveGoalTitle: { color: 'rgba(255,255,255,0.7)', fontSize: 11, fontWeight: 'bold' },
+  audioGoalTitle: { color: '#FFF', fontSize: 16, fontWeight: '900' },
   liveGoalStats: { color: '#FBBF24', fontSize: 12, fontWeight: '900' },
+  audioGoalStats: { fontSize: 17 },
   liveGoalBgBar: { height: 10, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 5, overflow: 'hidden' },
   liveGoalProgressBar: { height: '100%', borderRadius: 5 },
 

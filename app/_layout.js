@@ -77,7 +77,10 @@ function RootContent() {
               <Stack.Screen name="auth/signup" options={{ headerShown: false }} />
               <Stack.Screen name="main/(tabs)" options={{ headerShown: false }} />
               <Stack.Screen name="main/notifications" options={{ headerShown: false }} />
-              <Stack.Screen name="broadcast/[id]" options={{ headerShown: false, presentation: 'fullScreenModal' }} />
+              <Stack.Screen
+                name="broadcast/[id]"
+                options={{ headerShown: false, presentation: 'fullScreenModal', animation: 'none' }}
+              />
             </Stack>
           </MaintenanceGate>
         </ForceUpdateGate>

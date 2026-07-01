@@ -1,74 +1,113 @@
-/**
- * RemoteSplashGate
- * ----------------
- * Renders a full-screen splash overlay AFTER the JS bundle boots but
- * BEFORE the user gets to interact with the home screen.
- *
- *   • If the admin has shipped a seasonal splash (Supabase Storage,
- *     image or Lottie), we show that.
- *   • Otherwise we show a bundled fallback (the same splash-icon.png
- *     the native splash uses, on the same #1A1230 background) so
- *     EVERY launch — including first-ever install with no network —
- *     gets a consistent 1.8s branded moment.
- *
- * Why we always render something:
- *   The native splash auto-hides ~50ms after JS boot (see
- *   app/_layout.js's SplashScreen.hideAsync call). If we showed
- *   nothing, the user would land on the home screen ~1s after tapping
- *   the icon — too abrupt for the "branded launch" UX users expect.
- *
- * Mount as a SIBLING of the navigation Stack, not a wrapper, so the
- * tree below keeps initialising in the background while the splash is
- * up. By the time the overlay fades, the home screen is fully warm.
- *
- * State machine:
- *   resolving — first paint, deciding what to show (sync, ~5ms)
- *   showing   — overlay visible, holding for duration_ms
- *   fading    — opacity animating down, blocking taps via pointerEvents
- *   done      — unmounted, the gate is invisible
- */
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import LottieView from 'lottie-react-native';
 import React, { useEffect, useRef, useState } from 'react';
-import { Image, Animated, StyleSheet, StatusBar } from 'react-native';
+import { Animated, Image, StyleSheet, StatusBar, View } from 'react-native';
+import { supabase } from '../api/supabase';
 
-const WELCOME_ART = require('../../assets/onboarding/welcome-loading.webp');
-const HOLD_MS = 2600;
+const CACHE_KEY = 'care-live-active-splash';
+const DEFAULT_BACKGROUND = '#0F091E';
 const FADE_OUT_MS = 350;
 
-// Once dismissed in this app session, never re-show — even after a
-// fast-refresh re-mount in dev. Outside the component so React state
-// doesn't reset it.
-let __shownThisSession = false;
+let shownThisSession = false;
+
+const normalizeSplash = (row) => {
+  if (!row?.media_url) return null;
+  return {
+    ...row,
+    duration_ms: Math.min(6000, Math.max(500, Number(row.duration_ms) || 2000)),
+    background_color: row.background_color || DEFAULT_BACKGROUND,
+  };
+};
 
 export default function RemoteSplashGate() {
-  const [phase, setPhase] = useState(__shownThisSession ? 'done' : 'showing');
+  const [phase, setPhase] = useState(shownThisSession ? 'done' : 'resolving');
+  const [splash, setSplash] = useState(null);
   const fade = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
-    if (__shownThisSession) return undefined;
-    __shownThisSession = true;
-    return undefined;
+    if (shownThisSession) return undefined;
+    shownThisSession = true;
+    let cancelled = false;
+
+    const resolveSplash = async () => {
+      let cached = null;
+      try {
+        const stored = await AsyncStorage.getItem(CACHE_KEY);
+        cached = stored ? normalizeSplash(JSON.parse(stored)) : null;
+      } catch (_) {}
+
+      try {
+        const { data, error } = await supabase.rpc('get_active_splash');
+        if (error) throw error;
+        const active = normalizeSplash(Array.isArray(data) ? data[0] : data);
+
+        if (!active) {
+          await AsyncStorage.removeItem(CACHE_KEY);
+          if (!cancelled) setPhase('done');
+          return;
+        }
+
+        await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(active));
+        if (active.media_type === 'image') {
+          await Image.prefetch(active.media_url).catch(() => {});
+        }
+        if (!cancelled) {
+          setSplash(active);
+          setPhase('showing');
+        }
+      } catch (_) {
+        if (!cancelled && cached) {
+          setSplash(cached);
+          setPhase('showing');
+        } else if (!cancelled) {
+          setPhase('done');
+        }
+      }
+    };
+
+    resolveSplash();
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
-    if (phase !== 'showing') return undefined;
-    const t = setTimeout(() => {
+    if (phase !== 'showing' || !splash) return undefined;
+    const timer = setTimeout(() => {
       setPhase('fading');
       Animated.timing(fade, {
-        toValue: 0, duration: FADE_OUT_MS, useNativeDriver: true,
-      }).start(({ finished }) => { if (finished) setPhase('done'); });
-    }, HOLD_MS);
-    return () => clearTimeout(t);
-  }, [phase, fade]);
+        toValue: 0,
+        duration: FADE_OUT_MS,
+        useNativeDriver: true,
+      }).start(({ finished }) => {
+        if (finished) setPhase('done');
+      });
+    }, splash.duration_ms);
+    return () => clearTimeout(timer);
+  }, [fade, phase, splash]);
 
   if (phase === 'done') return null;
 
   return (
     <Animated.View
       pointerEvents={phase === 'showing' ? 'auto' : 'none'}
-      style={[styles.overlay, { opacity: fade }]}
+      style={[
+        styles.overlay,
+        { backgroundColor: splash?.background_color || DEFAULT_BACKGROUND, opacity: fade },
+      ]}
     >
       <StatusBar translucent backgroundColor="transparent" barStyle="light-content" />
-      <Image source={WELCOME_ART} style={styles.media} resizeMode="cover" />
+      {splash?.media_type === 'lottie' ? (
+        <LottieView
+          source={{ uri: splash.media_url }}
+          autoPlay
+          loop
+          resizeMode="cover"
+          style={styles.media}
+        />
+      ) : splash ? (
+        <Image source={{ uri: splash.media_url }} style={styles.media} resizeMode="cover" />
+      ) : (
+        <View style={styles.media} />
+      )}
     </Animated.View>
   );
 }
@@ -76,9 +115,6 @@ export default function RemoteSplashGate() {
 const styles = StyleSheet.create({
   overlay: {
     ...StyleSheet.absoluteFillObject,
-    // zIndex above everything, including modals. Switches to
-    // pointerEvents='none' during fade so a tap in the fade window
-    // reaches the home screen, not the dying overlay.
     zIndex: 9999,
     elevation: 9999,
     justifyContent: 'center',

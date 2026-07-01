@@ -143,6 +143,7 @@ function ImageCarousel({ banners, width, onPress, compact = false, reverseFallba
   const listRef = useRef(null);
   const [active, setActive] = useState(0);
   const paused = useRef(false);
+  const resumeTimer = useRef(null);
   const slideWidth = width - 32;
   const slides = useMemo(() => {
     const fallback = reverseFallback ? [...FALLBACK_CAROUSEL].reverse() : FALLBACK_CAROUSEL;
@@ -161,9 +162,17 @@ function ImageCarousel({ banners, width, onPress, compact = false, reverseFallba
         listRef.current?.scrollToOffset({ offset: next * slideWidth, animated: true });
         return next;
       });
-    }, 5500);
-    return () => clearInterval(timer);
-  }, [slideWidth, slides.length]);
+    }, compact ? 4000 : 5500);
+    return () => {
+      clearInterval(timer);
+      if (resumeTimer.current) clearTimeout(resumeTimer.current);
+    };
+  }, [compact, slideWidth, slides.length]);
+
+  const resumeAutoplay = () => {
+    if (resumeTimer.current) clearTimeout(resumeTimer.current);
+    resumeTimer.current = setTimeout(() => { paused.current = false; }, 3000);
+  };
 
   return (
     <View style={[styles.heroShell, compact && styles.secondaryCarousel]}>
@@ -174,9 +183,12 @@ function ImageCarousel({ banners, width, onPress, compact = false, reverseFallba
         data={slides}
         keyExtractor={(item) => item.id}
         showsHorizontalScrollIndicator={false}
-        onTouchStart={() => { paused.current = true; }}
-        onTouchEnd={() => { setTimeout(() => { paused.current = false; }, 5000); }}
-        onMomentumScrollEnd={(e) => setActive(Math.round(e.nativeEvent.contentOffset.x / slideWidth))}
+        onScrollBeginDrag={() => { paused.current = true; }}
+        onScrollEndDrag={resumeAutoplay}
+        onMomentumScrollEnd={(e) => {
+          setActive(Math.round(e.nativeEvent.contentOffset.x / slideWidth));
+          resumeAutoplay();
+        }}
         renderItem={({ item }) => (
           <TouchableOpacity activeOpacity={0.96} onPress={() => onPress(item)} style={[styles.heroCard, compact && styles.secondarySlide, { width: slideWidth }]}>
             <Image source={item.source} style={styles.carouselImage} resizeMode="cover" />
@@ -202,8 +214,6 @@ function QuickActionCard({ item, onPress }) {
         </View>
         <View style={styles.quickCopy}>
           <Text style={styles.quickTitle} numberOfLines={1} adjustsFontSizeToFit>{item.title}</Text>
-          <Text style={styles.quickSubtitle} numberOfLines={1}>{item.subtitle}</Text>
-          <Text style={[styles.quickMeta, item.key === 'network' && styles.quickMetaGreen]} numberOfLines={1} adjustsFontSizeToFit>{item.meta}</Text>
         </View>
       </LinearGradient>
     </TouchableOpacity>
@@ -540,10 +550,10 @@ const styles = StyleSheet.create({
     borderWidth: 1.5, borderColor: '#16103E', alignItems: 'center', justifyContent: 'center',
   },
   notifBadgeText: { color: '#FFF', fontSize: 9, fontWeight: '900' },
-  categoryList: { paddingHorizontal: 16, paddingVertical: 8 },
-  categoryTouch: { marginRight: 9, borderRadius: 22 },
+  categoryList: { paddingHorizontal: 16, paddingVertical: 6 },
+  categoryTouch: { marginRight: 9, borderRadius: 18 },
   categoryPill: {
-    height: 43, minWidth: 86, borderRadius: 22, paddingHorizontal: 15,
+    height: 36, minWidth: 86, borderRadius: 18, paddingHorizontal: 15,
     flexDirection: 'row', gap: 7, alignItems: 'center', justifyContent: 'center',
     backgroundColor: 'rgba(22,25,70,.64)', borderWidth: 1, borderColor: 'rgba(187,169,255,.26)',
   },
@@ -580,26 +590,23 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'stretch',
     paddingHorizontal: 12,
-    rowGap: 8,
-    marginTop: 10,
+    rowGap: 6,
+    marginTop: 8,
   },
-  quickTouch: { width: '48.7%', height: 88, borderRadius: 19 },
+  quickTouch: { width: '48.7%', height: 44, borderRadius: 12 },
   quickCard: {
-    height: 88, borderRadius: 19, paddingHorizontal: 8, paddingVertical: 7,
-    borderWidth: 1.2, overflow: 'hidden', flexDirection: 'row', alignItems: 'center', gap: 8,
-    shadowOpacity: .42, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 7,
+    height: 44, borderRadius: 12, paddingHorizontal: 7, paddingVertical: 4,
+    borderWidth: 1, overflow: 'hidden', flexDirection: 'row', alignItems: 'center', gap: 7,
+    shadowOpacity: .35, shadowRadius: 7, shadowOffset: { width: 0, height: 3 }, elevation: 5,
   },
-  quickGlow: { position: 'absolute', width: 82, height: 82, borderRadius: 41, left: -24, top: -24 },
+  quickGlow: { position: 'absolute', width: 52, height: 52, borderRadius: 26, left: -14, top: -14 },
   quickIconShell: {
-    width: 50, height: 52, borderRadius: 15, alignItems: 'center', justifyContent: 'center',
+    width: 35, height: 35, borderRadius: 10, alignItems: 'center', justifyContent: 'center',
     backgroundColor: 'rgba(19,10,67,.30)', borderWidth: 1,
   },
-  quickAsset: { width: 48, height: 54 },
+  quickAsset: { width: 33, height: 35 },
   quickCopy: { flex: 1, minWidth: 0 },
-  quickTitle: { color: '#FFF', fontSize: 16, fontWeight: '900', textShadowColor: 'rgba(18,5,54,.55)', textShadowRadius: 4 },
-  quickSubtitle: { color: '#F3EFFF', fontSize: 12, marginTop: 4 },
-  quickMeta: { color: '#FFE34F', fontSize: 13, fontWeight: '900', marginTop: 6 },
-  quickMetaGreen: { color: '#46FFAE' },
+  quickTitle: { color: '#FFF', fontSize: 15, fontWeight: '900', textShadowColor: 'rgba(18,5,54,.55)', textShadowRadius: 4 },
   sectionHeader: { marginTop: 23, marginBottom: 10, paddingHorizontal: 17, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   sectionTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   sectionAsset: { width: 28, height: 28 },

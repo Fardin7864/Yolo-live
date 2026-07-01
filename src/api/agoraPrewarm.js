@@ -113,7 +113,11 @@ export async function prewarmAgora({ channelName, isVideo, role = 'publisher' })
             mirrorMode: 0,
           });
         } catch (_) {}
-        try { engine.startPreview(); } catch (_) {}
+        // Do not call startPreview until broadcast/[id] has mounted its
+        // RtcSurfaceView. Starting a native preview with no target view can
+        // place an opaque black surface above React Native on Android,
+        // hiding the countdown. Joining with publishCameraTrack enabled
+        // still warms capture and publishing during the countdown.
       }
     } else {
       engine.disableVideo();
