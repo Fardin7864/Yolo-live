@@ -19,7 +19,7 @@ import { usePreventScreenCapture } from 'expo-screen-capture';
 import { useKeepAwake } from 'expo-keep-awake';
 import FruitRoulette from '../../src/components/games/FruitRoulette';
 import TeenPatti from '../../src/components/games/TeenPatti';
-import Html5RoyalFeast from '../../src/components/games/Html5RoyalFeast';
+import GreedyLion from '../../src/components/games/GreedyLion';
 import AudioTemplateSheet from '../../src/components/audio/AudioTemplateSheet';
 import { useGlobalState } from '../../src/context/GlobalStateContext';
 import { resolveGiftAnimation } from '../../src/theme/giftAnimations';
@@ -207,7 +207,9 @@ export default function BroadcastRoomScreen() {
 
   // Economy & Gifts System States (Global State)
   const {
-    diamonds: myDiamonds, setDiamonds: setMyDiamonds, user,
+    diamonds: myDiamonds, setDiamonds: setMyDiamonds,
+    beans: myBeans, setBeans: setMyBeans,
+    user,
     sendGiftSecurely, startLiveStream, endLiveStream,
     followUser, unfollowUser, isFollowing: checkFollowing,
     gameSettings,
@@ -223,7 +225,7 @@ export default function BroadcastRoomScreen() {
   // without an app restart.
   const fruitActive    = gameSettings?.fruit_roulette?.is_active !== false;
   const teenPattiActive = gameSettings?.teen_patti?.is_active     !== false;
-  const royalFeastActive = gameSettings?.royal_feast?.is_active !== false;
+  const greedyLionActive = gameSettings?.greedy_lion?.is_active !== false;
 
   // Gift catalogue, normalised from the DB into the legacy GIFT_ITEMS
   // shape the rest of this file already speaks. Falls back to the local
@@ -3711,11 +3713,11 @@ export default function BroadcastRoomScreen() {
     // Compact 2-column tile grid for the picker; the game body itself
     // takes 'auto' height so it sizes to its own content.
     const menuHeight = Math.min(620, Math.round(height * 0.72));
-    const royalFeastHeight = Math.min(760, height - insets.top - 12);
+    const greedyLionHeight = Math.min(760, height - insets.top - 12);
     const gameSheetHeight = gameMenuState === 'menu'
       ? menuHeight
-      : gameMenuState === 'royalfeast'
-        ? royalFeastHeight
+      : gameMenuState === 'greedylion'
+        ? greedyLionHeight
         : 'auto';
     return (
       <Modal animationType="slide" transparent={true} visible={gameMenuState !== null} onRequestClose={() => setGameMenuState(null)}>
@@ -3784,30 +3786,30 @@ export default function BroadcastRoomScreen() {
                     </TouchableOpacity>
                   )}
 
-                  {royalFeastActive && (
+                  {greedyLionActive && (
                     <TouchableOpacity
                       style={styles.gameTile}
                       activeOpacity={0.85}
-                      onPress={() => setGameMenuState('royalfeast')}
+                      onPress={() => setGameMenuState('greedylion')}
                     >
                       <LinearGradient
                         colors={['rgba(245,199,106,0.20)', 'rgba(126,52,174,0.18)']}
                         style={styles.gameTileGrad}
                       >
                         <View style={styles.gameTileIconWrap}>
-                          <Text style={styles.gameTileEmoji}>👑</Text>
+                          <Text style={styles.gameTileEmoji}>🦁</Text>
                         </View>
-                        <Text style={styles.gameTileName} numberOfLines={1}>Royal Feast</Text>
-                        <Text style={styles.gameTileDesc} numberOfLines={2}>Choose a feast. Win up to 45×.</Text>
+                        <Text style={styles.gameTileName} numberOfLines={1}>Greedy Lion</Text>
+                        <Text style={styles.gameTileDesc} numberOfLines={2}>Pick up to 6 foods. Pizza or Salad wins.</Text>
                         <View style={styles.gameTileChip}>
-                          <Ionicons name="globe-outline" size={10} color="#F5C76A" />
-                          <Text style={[styles.gameTileChipText, { color: '#F5C76A' }]}>HTML5</Text>
+                          <Ionicons name="people-outline" size={10} color="#F5C76A" />
+                          <Text style={[styles.gameTileChipText, { color: '#F5C76A' }]}>Native</Text>
                         </View>
                       </LinearGradient>
                     </TouchableOpacity>
                   )}
 
-                  {!fruitActive && !teenPattiActive && !royalFeastActive && (
+                  {!fruitActive && !teenPattiActive && !greedyLionActive && (
                     <View style={styles.gameTileEmpty}>
                       <Ionicons name="game-controller-outline" size={44} color="rgba(255,255,255,0.2)" />
                       <Text style={styles.gameTileEmptyText}>
@@ -3839,9 +3841,8 @@ export default function BroadcastRoomScreen() {
               />
             )}
 
-            {gameMenuState === 'royalfeast' && (
-              <Html5RoyalFeast
-                roomId={id}
+            {gameMenuState === 'greedylion' && (
+              <GreedyLion
                 myDiamonds={myDiamonds}
                 setMyDiamonds={setMyDiamonds}
                 onBack={() => setGameMenuState('menu')}

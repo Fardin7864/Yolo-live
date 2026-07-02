@@ -58,6 +58,36 @@ const QUICK_ACTIONS = [
   { key: 'svip', title: 'SVIP', subtitle: 'Super privileges', meta: 'SVIP', colors: ['#4D1D95', '#8B2AE6', '#D97706'], glow: '#FCD34D', route: '/main/vip' },
 ];
 
+const GAME_ITEMS = [
+  {
+    key: 'fruit_roulette',
+    title: 'Fruit Roulette',
+    subtitle: 'Pick a fruit. Win up to 8x.',
+    icon: 'disc',
+    emoji: '🍓',
+    colors: ['#FF336A', '#7B2DFF', '#1C1162'],
+    chip: 'Multiplayer',
+  },
+  {
+    key: 'teen_patti',
+    title: 'Teen Patti',
+    subtitle: 'Bet on A, B or C. Winner pays 2x.',
+    icon: 'albums',
+    emoji: '🃏',
+    colors: ['#0EA5E9', '#5137E8', '#160C5A'],
+    chip: 'Cards',
+  },
+  {
+    key: 'greedy_lion',
+    title: 'Greedy Lion',
+    subtitle: 'Pick up to 6 foods. Pizza or Salad wins.',
+    icon: 'trophy',
+    emoji: '🦁',
+    colors: ['#F59E0B', '#B91C9B', '#11115F'],
+    chip: 'Native',
+  },
+];
+
 const PAGE_SIZE = 10;
 
 const formatCount = (value) => {
@@ -299,6 +329,39 @@ function ShowMoreButton({ loading, onPress }) {
   );
 }
 
+function GamesHeader() {
+  return (
+    <View style={styles.gamesHeader}>
+      <View style={styles.gamesHeaderIcon}>
+        <Ionicons name="game-controller" size={19} color="#FFFFFF" />
+      </View>
+      <Text style={styles.gamesHeaderTitle}>All Games</Text>
+    </View>
+  );
+}
+
+function GameCard({ game, onPress, style }) {
+  return (
+    <TouchableOpacity activeOpacity={0.88} onPress={onPress} style={[styles.gameCardTouch, style]}>
+      <LinearGradient colors={game.colors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.gameCard}>
+        <View style={styles.gameCardGlow} />
+        <View style={styles.gameIconBubble}>
+          <Text style={styles.gameEmoji}>{game.emoji}</Text>
+        </View>
+        <Ionicons name={game.icon} size={52} color="rgba(255,255,255,.18)" style={styles.gameWatermark} />
+        <View style={styles.gameCardCopy}>
+          <Text style={styles.gameCardTitle} numberOfLines={1}>{game.title}</Text>
+          <Text style={styles.gameCardSubtitle} numberOfLines={2}>{game.subtitle}</Text>
+        </View>
+        <View style={styles.gameCardFooter}>
+          <Text style={styles.gameChipText}>{game.chip}</Text>
+          <Ionicons name="chevron-forward" size={16} color="#FFFFFF" />
+        </View>
+      </LinearGradient>
+    </TouchableOpacity>
+  );
+}
+
 function EventCard({ event, index, onPress }) {
   const themes = [
     ['#64105E', '#3926A8', '#07113D'],
@@ -353,7 +416,7 @@ function EmptySection({ background, title, subtitle, action, actionIcon, onPress
 export default function PremiumHomeScreen() {
   const router = useRouter();
   const { width } = useWindowDimensions();
-  const { user, homeBanners } = useGlobalState();
+  const { user, homeBanners, gameSettings } = useGlobalState();
   const [activeCategory, setActiveCategory] = useState('Trending');
   const [liveStreams, setLiveStreams] = useState([]);
   const [liveHasMore, setLiveHasMore] = useState(false);
@@ -367,7 +430,12 @@ export default function PremiumHomeScreen() {
   const [unreadCount, setUnreadCount] = useState(0);
   const topBanners = (homeBanners || []).filter((b) => (b.position || 'top') === 'top' && b.is_active !== false);
   const eventBanners = (homeBanners || []).filter((b) => b.position === 'bottom' && b.is_active !== false);
+  const isGaming = activeCategory === 'Gaming';
   const showNearby = activeCategory === 'Nearby';
+  const games = useMemo(
+    () => GAME_ITEMS.filter((game) => gameSettings?.[game.key]?.is_active !== false),
+    [gameSettings],
+  );
   const liveFirstPage = liveStreams.slice(0, 4);
   const liveRest = liveStreams.slice(4);
   const hostList = showNearby ? nearbyHosts : hosts;
@@ -457,11 +525,12 @@ export default function PremiumHomeScreen() {
   }, [user?.id]);
 
   const fetchAll = useCallback(async () => {
+    if (isGaming) return;
     await Promise.all([
       fetchLiveStreams({ reset: true }),
       showNearby ? fetchNearbyHosts({ reset: true }) : fetchHosts({ reset: true }),
     ]);
-  }, [fetchHosts, fetchLiveStreams, fetchNearbyHosts, showNearby]);
+  }, [fetchHosts, fetchLiveStreams, fetchNearbyHosts, isGaming, showNearby]);
 
   useEffect(() => {
     setLoading(true);
@@ -533,115 +602,139 @@ export default function PremiumHomeScreen() {
           {QUICK_ACTIONS.map((item) => <QuickActionCard key={item.key} item={item} onPress={() => router.push(item.route)} />)}
         </View>
 
-        <SectionHeader asset={SECTION_ICONS.popular} title="Popular Live" onViewAll={() => router.push('/main/(tabs)/explore')} />
-        {loading ? (
-          <View style={styles.loader}><LogoLoader size="small" /></View>
-        ) : liveStreams.length ? (
+        {isGaming ? (
           <>
-            <TwoColumnGrid
-              items={liveFirstPage}
-              renderItem={(item, index) => (
-                <LiveStreamCard
-                  key={item.streamId}
-                  stream={item}
-                  style={styles.gridCard}
-                  onPress={() => openStream(item, index)}
-                />
-              )}
-            />
-            {liveRest.length ? <ImageCarousel banners={eventBanners} width={width} onPress={openHero} compact reverseFallback /> : null}
-            {liveRest.length ? (
+            <GamesHeader />
+            {games.length ? (
               <TwoColumnGrid
-                items={liveRest}
-                style={styles.gridAfterCarousel}
-                renderItem={(item, index) => (
-                  <LiveStreamCard
-                    key={item.streamId}
-                    stream={item}
-                    style={styles.gridCard}
-                    onPress={() => openStream(item, index + 4)}
-                  />
-                )}
+                items={games}
+                style={styles.gamesGrid}
+                renderItem={(item) => <GameCard key={item.key} game={item} style={styles.gridCard} onPress={() => router.push(`/main/game/${item.key}`)} />}
               />
-            ) : null}
-            {liveHasMore ? <ShowMoreButton loading={loadingMoreLive} onPress={loadMoreLive} /> : null}
+            ) : (
+              <EmptySection
+                background={EMPTY_BACKGROUNDS.events}
+                title="No games available"
+                subtitle="Games will appear here when they are enabled."
+                action="Explore"
+                actionIcon="game-controller"
+                onPress={() => router.push('/main/(tabs)/explore')}
+              />
+            )}
           </>
         ) : (
-          <EmptySection
-            background={EMPTY_BACKGROUNDS.live}
-            title="No live streams right now"
-            subtitle="Be the first to go live and start entertaining!"
-            action="Go Live"
-            actionIcon="videocam"
-            onPress={() => router.push('/main/(tabs)/live')}
-          />
-        )}
-
-        {!loading && (hostList.length ? (
           <>
-            <TwoColumnGrid
-              items={liveStreams.length ? hostList : hostFirstPage}
-              style={styles.hostGridNoHeader}
-              renderItem={(item, index) => (
-                <HostProfileCard
-                  key={item.id}
-                  host={item}
-                  index={index}
-                  nearby={showNearby}
-                  style={styles.gridCard}
-                  onPress={() => router.push(`/main/user/${item.id}`)}
+            <SectionHeader asset={SECTION_ICONS.popular} title="Popular Live" onViewAll={() => router.push('/main/(tabs)/explore')} />
+            {loading ? (
+              <View style={styles.loader}><LogoLoader size="small" /></View>
+            ) : liveStreams.length ? (
+              <>
+                <TwoColumnGrid
+                  items={liveFirstPage}
+                  renderItem={(item, index) => (
+                    <LiveStreamCard
+                      key={item.streamId}
+                      stream={item}
+                      style={styles.gridCard}
+                      onPress={() => openStream(item, index)}
+                    />
+                  )}
                 />
-              )}
-            />
-            {!liveStreams.length && hostFirstPage.length >= 4 ? (
-              <ImageCarousel banners={eventBanners} width={width} onPress={openHero} compact reverseFallback />
-            ) : null}
-            {!liveStreams.length && hostRest.length ? (
-              <TwoColumnGrid
-                items={hostRest}
-                style={styles.gridAfterCarousel}
-                renderItem={(item, index) => (
-                  <HostProfileCard
-                    key={item.id}
-                    host={item}
-                    index={index + 4}
-                    nearby={showNearby}
-                    style={styles.gridCard}
-                    onPress={() => router.push(`/main/user/${item.id}`)}
+                {liveRest.length ? <ImageCarousel banners={eventBanners} width={width} onPress={openHero} compact reverseFallback /> : null}
+                {liveRest.length ? (
+                  <TwoColumnGrid
+                    items={liveRest}
+                    style={styles.gridAfterCarousel}
+                    renderItem={(item, index) => (
+                      <LiveStreamCard
+                        key={item.streamId}
+                        stream={item}
+                        style={styles.gridCard}
+                        onPress={() => openStream(item, index + 4)}
+                      />
+                    )}
                   />
-                )}
+                ) : null}
+                {liveHasMore ? <ShowMoreButton loading={loadingMoreLive} onPress={loadMoreLive} /> : null}
+              </>
+            ) : (
+              <EmptySection
+                background={EMPTY_BACKGROUNDS.live}
+                title="No live streams right now"
+                subtitle="Be the first to go live and start entertaining!"
+                action="Go Live"
+                actionIcon="videocam"
+                onPress={() => router.push('/main/(tabs)/live')}
               />
-            ) : null}
-            {hostHasMore ? <ShowMoreButton loading={loadingMoreHosts} onPress={loadMoreHosts} /> : null}
-          </>
-        ) : (
-          <EmptySection
-            background={showNearby ? EMPTY_BACKGROUNDS.nearby : EMPTY_BACKGROUNDS.live}
-            title={showNearby ? 'No nearby hosts' : 'No hosts to show'}
-            subtitle={showNearby ? 'Try again later or explore other categories.' : 'Profiles will appear here when hosts are available.'}
-            action="Explore"
-            onPress={() => router.push('/main/(tabs)/explore')}
-          />
-        ))}
+            )}
 
-        <SectionHeader asset={SECTION_ICONS.events} title="Top Events" onViewAll={() => router.push('/main/(tabs)/explore')} />
-        {eventBanners.length ? (
-          <FlatList
-            horizontal
-            data={eventBanners}
-            keyExtractor={(item) => item.id}
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.horizontalRow}
-            renderItem={({ item, index }) => <EventCard event={item} index={index} onPress={() => item.link_url && router.push(item.link_url)} />}
-          />
-        ) : (
-          <EmptySection
-            background={EMPTY_BACKGROUNDS.events}
-            title="No events at the moment"
-            subtitle="Check back soon for exciting events and competitions!"
-            action="Explore Events"
-            onPress={() => router.push('/main/(tabs)/explore')}
-          />
+            {!loading && (hostList.length ? (
+              <>
+                <TwoColumnGrid
+                  items={liveStreams.length ? hostList : hostFirstPage}
+                  style={styles.hostGridNoHeader}
+                  renderItem={(item, index) => (
+                    <HostProfileCard
+                      key={item.id}
+                      host={item}
+                      index={index}
+                      nearby={showNearby}
+                      style={styles.gridCard}
+                      onPress={() => router.push(`/main/user/${item.id}`)}
+                    />
+                  )}
+                />
+                {!liveStreams.length && hostFirstPage.length >= 4 ? (
+                  <ImageCarousel banners={eventBanners} width={width} onPress={openHero} compact reverseFallback />
+                ) : null}
+                {!liveStreams.length && hostRest.length ? (
+                  <TwoColumnGrid
+                    items={hostRest}
+                    style={styles.gridAfterCarousel}
+                    renderItem={(item, index) => (
+                      <HostProfileCard
+                        key={item.id}
+                        host={item}
+                        index={index + 4}
+                        nearby={showNearby}
+                        style={styles.gridCard}
+                        onPress={() => router.push(`/main/user/${item.id}`)}
+                      />
+                    )}
+                  />
+                ) : null}
+                {hostHasMore ? <ShowMoreButton loading={loadingMoreHosts} onPress={loadMoreHosts} /> : null}
+              </>
+            ) : (
+              <EmptySection
+                background={showNearby ? EMPTY_BACKGROUNDS.nearby : EMPTY_BACKGROUNDS.live}
+                title={showNearby ? 'No nearby hosts' : 'No hosts to show'}
+                subtitle={showNearby ? 'Try again later or explore other categories.' : 'Profiles will appear here when hosts are available.'}
+                action="Explore"
+                onPress={() => router.push('/main/(tabs)/explore')}
+              />
+            ))}
+
+            <SectionHeader asset={SECTION_ICONS.events} title="Top Events" onViewAll={() => router.push('/main/(tabs)/explore')} />
+            {eventBanners.length ? (
+              <FlatList
+                horizontal
+                data={eventBanners}
+                keyExtractor={(item) => item.id}
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.horizontalRow}
+                renderItem={({ item, index }) => <EventCard event={item} index={index} onPress={() => item.link_url && router.push(item.link_url)} />}
+              />
+            ) : (
+              <EmptySection
+                background={EMPTY_BACKGROUNDS.events}
+                title="No events at the moment"
+                subtitle="Check back soon for exciting events and competitions!"
+                action="Explore Events"
+                onPress={() => router.push('/main/(tabs)/explore')}
+              />
+            )}
+          </>
         )}
       </ScrollView>
     </SafeAreaView>
@@ -736,6 +829,25 @@ const styles = StyleSheet.create({
   sectionTitle: { color: '#FFF', fontSize: 20, fontWeight: '800' },
   viewAll: { flexDirection: 'row', alignItems: 'center', paddingVertical: 4 },
   viewAllText: { color: '#AAA9CA', fontSize: 13 },
+  gamesHeader: {
+    marginTop: 23,
+    marginBottom: 12,
+    paddingHorizontal: 17,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+  },
+  gamesHeaderIcon: {
+    width: 31,
+    height: 31,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(116,70,255,.82)',
+    borderWidth: 1,
+    borderColor: 'rgba(242,120,255,.68)',
+  },
+  gamesHeaderTitle: { color: '#FFF', fontSize: 20, fontWeight: '900' },
   horizontalRow: { paddingHorizontal: 16, gap: 10 },
   twoColumnGrid: {
     paddingHorizontal: 16,
@@ -747,6 +859,57 @@ const styles = StyleSheet.create({
   gridCard: { width: '48.5%' },
   gridAfterCarousel: { marginTop: 12 },
   hostGridNoHeader: { marginTop: 18 },
+  gamesGrid: { rowGap: 13 },
+  gameCardTouch: { height: 178, borderRadius: 18 },
+  gameCard: {
+    flex: 1,
+    borderRadius: 18,
+    padding: 13,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,.22)',
+    shadowColor: '#D946EF',
+    shadowOpacity: .28,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 7,
+  },
+  gameCardGlow: {
+    position: 'absolute',
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    right: -32,
+    top: -36,
+    backgroundColor: 'rgba(255,255,255,.16)',
+  },
+  gameIconBubble: {
+    width: 54,
+    height: 54,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,.16)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,.28)',
+  },
+  gameEmoji: { fontSize: 30 },
+  gameWatermark: { position: 'absolute', right: 12, top: 20, transform: [{ rotate: '-10deg' }] },
+  gameCardCopy: { flex: 1, justifyContent: 'flex-end', paddingBottom: 10 },
+  gameCardTitle: { color: '#FFFFFF', fontSize: 16, fontWeight: '900' },
+  gameCardSubtitle: { color: 'rgba(255,255,255,.76)', fontSize: 11, lineHeight: 15, marginTop: 5 },
+  gameCardFooter: {
+    minHeight: 27,
+    borderRadius: 14,
+    paddingHorizontal: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(8,5,40,.34)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,.16)',
+  },
+  gameChipText: { color: '#FFFFFF', fontSize: 10, fontWeight: '900', textTransform: 'uppercase' },
   showMoreTouch: { alignSelf: 'center', marginTop: 16, marginBottom: 2, borderRadius: 18, overflow: 'hidden' },
   showMoreButton: {
     minWidth: 132,

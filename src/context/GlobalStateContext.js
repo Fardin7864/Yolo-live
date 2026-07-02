@@ -37,7 +37,7 @@ export const GlobalStateProvider = ({ children }) => {
   const [gameSettings, setGameSettings] = useState({
     teen_patti:     { is_active: true, win_chance_percent: 50 },
     fruit_roulette: { is_active: true, win_chance_percent: 50 },
-    royal_feast:    { is_active: true, win_chance_percent: 30 },
+    greedy_lion:    { is_active: true, win_chance_percent: 60 },
   });
 
   // ============================================================
