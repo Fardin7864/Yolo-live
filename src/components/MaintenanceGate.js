@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -12,14 +12,22 @@ import { BRAND } from '../theme/brand';
  * through so they can manage the platform during maintenance.
  */
 export default function MaintenanceGate({ children }) {
-  const { systemSettings, role, loading } = useGlobalState();
+  const { systemSettings, role, user, loading } = useGlobalState();
 
   // While we're still bootstrapping (auth + system settings), let children render.
   // Avoids a maintenance flash on cold start when defaults are false anyway.
   if (loading) return children;
 
   const isAdmin = role === 'admin' || role === 'super_admin';
-  if (!systemSettings.maintenance_mode || isAdmin) return children;
+  const bypassIds = Array.isArray(systemSettings.maintenance_bypass_user_ids)
+    ? systemSettings.maintenance_bypass_user_ids.map((id) => String(id).trim()).filter(Boolean)
+    : [];
+  const currentUserIds = [user?.id, user?.displayId]
+    .map((id) => id == null ? '' : String(id).trim())
+    .filter(Boolean);
+  const canBypassMaintenance = isAdmin || currentUserIds.some((id) => bypassIds.includes(id));
+
+  if (!systemSettings.maintenance_mode || canBypassMaintenance) return children;
 
   const platform = systemSettings.platform_name || 'Care Live';
   const message = systemSettings.maintenance_message ||

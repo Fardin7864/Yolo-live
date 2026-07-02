@@ -52,6 +52,7 @@ const DEFAULT_ITEMS = [
 
 const itemImageById = DEFAULT_ITEMS.reduce((acc, item) => ({ ...acc, [item.id]: item.image }), {});
 const categoryAsset = { pizza: A.pizzaFood, salad: A.saladFood };
+const itemById = DEFAULT_ITEMS.reduce((acc, item) => ({ ...acc, [item.id]: item }), {});
 
 const compact = (value) => {
   const n = Number(value || 0);
@@ -152,11 +153,14 @@ export default function GreedyLion({
     setRound(nextRound);
     setStatus(nextRound?.status || 'loading');
     setBetRows(Array.isArray(payload.bets) ? payload.bets : []);
-    setHistory(Array.isArray(payload.history) ? payload.history.slice(0, 15) : []);
+    setHistory(Array.isArray(payload.history)
+      ? payload.history.filter((row) => row?.result?.is_empty_round !== true && Number(row?.total_bet ?? 1) !== 0).slice(0, 15)
+      : []);
 
-    const category = nextRound?.winner_pos || nextRound?.result?.category;
-    if (nextRound?.status === 'settled' && category) {
-      showResult(nextRound, category, nextRound.result || {}, Array.isArray(payload.bets) ? payload.bets : []);
+    const result = nextRound?.result || {};
+    const winner = result?.winner_pos || nextRound?.winner_pos || result?.category;
+    if (nextRound?.status === 'settled' && winner) {
+      showResult(nextRound, winner, result, Array.isArray(payload.bets) ? payload.bets : []);
     } else if (nextRound?.status === 'betting') {
       setWinnerCategory(null);
       setRevealSpinIndex(-1);
@@ -177,8 +181,10 @@ export default function GreedyLion({
     applyState(data);
   }, [applyState]);
 
-  const showResult = useCallback((settledRound, category, result = {}, rowsOverride = null) => {
-    const key = `${settledRound.id}:${category}`;
+  const showResult = useCallback((settledRound, winner, result = {}, rowsOverride = null) => {
+    const resultType = result?.result_type || (winner === 'pizza' || winner === 'salad' ? 'category' : 'item');
+    const category = result?.category || (resultType === 'category' ? winner : items.find((it) => it.id === winner)?.category);
+    const key = `${settledRound.id}:${resultType}:${winner}`;
     if (resultShownRef.current === key) return;
     resultShownRef.current = key;
     clearRevealTimers();
@@ -187,14 +193,33 @@ export default function GreedyLion({
     const myRows = sourceRows.filter((row) => row.user_id === user?.id || row.user_id === 'demo');
     const matching = myRows.filter((row) => {
       const item = items.find((it) => it.id === row.position);
-      return item?.category === category;
+      return resultType === 'category' ? item?.category === category : row.position === winner;
     });
     const winAmount = matching.reduce((sum, row) => sum + Number(row.win_amount || 0), 0);
     const betAmount = myRows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+    const matchedBetAmount = matching.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+    const winnerItem = items.find((item) => item.id === winner);
+    const itemWiseBets = items
+      .map((item) => ({
+        id: item.id,
+        label: item.label,
+        amount: myRows
+          .filter((row) => row.position === item.id)
+          .reduce((sum, row) => sum + Number(row.amount || 0), 0),
+        won: resultType === 'category' ? item.category === category : item.id === winner,
+      }))
+      .filter((row) => row.amount > 0);
     const popup = {
       category,
+      resultType,
+      winner,
+      winnerLabel: resultType === 'category'
+        ? (category === 'pizza' ? 'Pizza' : 'Salad')
+        : (winnerItem?.label || 'Item'),
       winAmount,
       betAmount,
+      matchedBetAmount,
+      itemWiseBets,
       matchedIds: [...new Set(matching.map((row) => row.position))],
       topWinners: result?.top_winners || [],
     };
@@ -203,7 +228,7 @@ export default function GreedyLion({
     setWinnerCategory(null);
     setRevealLandingCategory(null);
 
-    const winningIndex = Math.max(0, items.findIndex((item) => item.category === category));
+    const winningIndex = Math.max(0, items.findIndex((item) => resultType === 'category' ? item.category === category : item.id === winner));
     const totalSteps = 26 + winningIndex;
     for (let step = 0; step <= totalSteps; step += 1) {
       const timer = setTimeout(() => setRevealSpinIndex(step % items.length), step * 70);
@@ -213,8 +238,8 @@ export default function GreedyLion({
     const landDelay = (totalSteps + 1) * 70;
     const landTimer = setTimeout(() => {
       setRevealSpinIndex(-1);
-      setRevealLandingCategory(category);
-      setWinnerCategory(category);
+      setRevealLandingCategory(resultType === 'category' ? category : winner);
+      setWinnerCategory(resultType === 'category' ? category : winner);
     }, landDelay);
     const popupTimer = setTimeout(() => {
       setResultPopup(popup);
@@ -317,7 +342,7 @@ export default function GreedyLion({
   };
 
   const title = status === 'settled'
-    ? `${winnerCategory === 'pizza' ? 'Pizza' : 'Salad'} Wins`
+    ? `${winnerCategory === 'pizza' ? 'Pizza' : winnerCategory === 'salad' ? 'Salad' : (itemById[winnerCategory]?.label || 'Item')} Wins`
     : timeLeft > 0
       ? 'Select Time'
       : 'Royal Draw';
@@ -364,9 +389,11 @@ export default function GreedyLion({
             </View>
             {items.map((item) => {
               const selected = selectedItems.has(item.id);
+              const revealActive = revealSpinIndex >= 0 || !!revealLandingCategory || status === 'settled';
               const spinning = revealSpinIndex >= 0 && items[revealSpinIndex]?.id === item.id;
-              const landing = revealLandingCategory && item.category === revealLandingCategory;
-              const win = spinning || landing || (winnerCategory && item.category === winnerCategory);
+              const landing = revealLandingCategory && (item.category === revealLandingCategory || item.id === revealLandingCategory);
+              const win = spinning || landing || (winnerCategory && (item.category === winnerCategory || item.id === winnerCategory));
+              const locked = revealActive && !win;
               return (
                 <TouchableOpacity
                   key={item.id}
@@ -388,6 +415,7 @@ export default function GreedyLion({
                     win && styles.itemCardWin,
                   ]}
                 >
+                  {locked ? <View style={styles.itemLockedOverlay} pointerEvents="none" /> : null}
                   <Image source={item.image} style={styles.itemImage} resizeMode="contain" />
                   <Text style={styles.itemMult}>x{item.m}</Text>
                   {itemBets[item.id] ? <Text style={styles.itemBet}>{compact(itemBets[item.id])}</Text> : null}
@@ -430,12 +458,14 @@ export default function GreedyLion({
             {history.length === 0 ? (
               <Text style={styles.emptyHistory}>First result coming soon</Text>
             ) : history.map((row, index) => {
-              const cat = row.winner_pos || row.result?.category;
+              const type = row.result?.result_type || (['pizza', 'salad'].includes(row.winner_pos) ? 'category' : 'item');
+              const winner = row.result?.winner_pos || row.winner_pos || row.result?.category;
+              const cat = row.result?.category || winner;
               return (
                 <View key={`${row.id || index}-${index}`} style={styles.historyItem}>
-                  <Image source={categoryAsset[cat] || A.chest} style={styles.historyImage} resizeMode="contain" />
+                  <Image source={type === 'category' ? (categoryAsset[cat] || A.chest) : (itemImageById[winner] || A.chest)} style={styles.historyImage} resizeMode="contain" />
                   {index === 0 ? <Text style={styles.newText}>NEW</Text> : null}
-                  <Text style={styles.historyText}>{cat === 'pizza' ? 'Pizza' : 'Salad'}</Text>
+                  <Text style={styles.historyText}>{type === 'category' ? (cat === 'pizza' ? 'Pizza' : 'Salad') : (itemById[winner]?.label || 'Item')}</Text>
                 </View>
               );
             })}
@@ -470,13 +500,31 @@ export default function GreedyLion({
       <Modal transparent animationType="fade" visible={!!resultPopup}>
         <View style={styles.popupOverlay}>
           <LinearGradient colors={['#4D1477', '#210743']} style={styles.popup}>
-            <Image source={categoryAsset[resultPopup?.category] || A.chest} style={styles.popupImage} resizeMode="contain" />
-            <Text style={styles.popupTitle}>{resultPopup?.category === 'pizza' ? 'Pizza Wins!' : 'Salad Wins!'}</Text>
+            <Image source={resultPopup?.resultType === 'category' ? (categoryAsset[resultPopup?.category] || A.chest) : (itemImageById[resultPopup?.winner] || A.chest)} style={styles.popupImage} resizeMode="contain" />
+            <Text style={styles.popupTitle}>
+              {resultPopup?.resultType === 'category'
+                ? (resultPopup?.category === 'pizza' ? 'Pizza Wins!' : 'Salad Wins!')
+                : `${itemById[resultPopup?.winner]?.label || 'Item'} Wins!`}
+            </Text>
             <Text style={styles.popupAmount}>
               {Number(resultPopup?.winAmount || 0) > 0
-                ? `You won ${compact(resultPopup.winAmount)} diamonds`
-                : `No matched item. Bet ${compact(resultPopup?.betAmount || 0)} diamonds`}
+                ? `You win ${compact(resultPopup.winAmount)} diamonds`
+                : 'You lose this board'}
             </Text>
+            <View style={styles.popupBetsBox}>
+              <Text style={styles.popupBetsTitle}>Your Bet On This Board</Text>
+              {(resultPopup?.itemWiseBets || []).length ? resultPopup.itemWiseBets.map((bet) => (
+                <View key={bet.id} style={styles.popupBetRow}>
+                  <Image source={itemImageById[bet.id]} style={styles.popupBetIcon} resizeMode="contain" />
+                  <Text style={styles.popupBetName}>{bet.label}</Text>
+                  <Text style={[styles.popupBetAmount, bet.won ? styles.popupBetWon : styles.popupBetLost]}>
+                    {compact(bet.amount)} 💎 {bet.won ? 'WIN' : 'LOSE'}
+                  </Text>
+                </View>
+              )) : (
+                <Text style={styles.noWinners}>No bet on this board</Text>
+              )}
+            </View>
             <View style={styles.popupItems}>
               {(resultPopup?.matchedIds || []).map((id) => (
                 <Image key={id} source={itemImageById[id]} style={styles.popupItem} resizeMode="contain" />
@@ -571,6 +619,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: 'transparent',
   },
+  itemLockedOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 20,
+    borderRadius: 18,
+    backgroundColor: 'rgba(5,0,24,.62)',
+  },
   itemCardSelected: { transform: [{ scale: 1.08 }] },
   itemCardSpin: { transform: [{ scale: 1.22 }] },
   itemCardLanding: { transform: [{ scale: 1.16 }] },
@@ -644,6 +698,14 @@ const styles = StyleSheet.create({
   popupImage: { width: 170, height: 105 },
   popupTitle: { color: '#FFF2BF', fontSize: 24, fontWeight: '900', marginTop: 2 },
   popupAmount: { color: '#FFFFFF', fontSize: 15, fontWeight: '800', textAlign: 'center', marginTop: 7 },
+  popupBetsBox: { width: '100%', marginTop: 10, backgroundColor: 'rgba(16,2,38,.34)', borderRadius: 14, borderWidth: 1, borderColor: 'rgba(240,195,90,.28)', padding: 9 },
+  popupBetsTitle: { color: '#FFE7A2', fontSize: 12, fontWeight: '900', textAlign: 'center', marginBottom: 5 },
+  popupBetRow: { flexDirection: 'row', alignItems: 'center', minHeight: 28, gap: 6 },
+  popupBetIcon: { width: 24, height: 24 },
+  popupBetName: { flex: 1, color: '#FFFFFF', fontSize: 12, fontWeight: '800' },
+  popupBetAmount: { fontSize: 11, fontWeight: '900' },
+  popupBetWon: { color: '#27F58B' },
+  popupBetLost: { color: '#FF7373' },
   popupItems: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8, marginTop: 8, minHeight: 34 },
   popupItem: { width: 40, height: 40 },
   winnersBox: { width: '100%', backgroundColor: 'rgba(16,2,38,.42)', borderRadius: 14, borderWidth: 1, borderColor: 'rgba(240,195,90,.38)', padding: 10, marginTop: 10 },

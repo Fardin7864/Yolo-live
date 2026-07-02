@@ -24,6 +24,7 @@ export const GlobalStateProvider = ({ children }) => {
   const [systemSettings, setSystemSettings] = useState({
     maintenance_mode: false,
     maintenance_message: '',
+    maintenance_bypass_user_ids: [],
     signup_enabled: true,
     live_enabled: true,
     gifting_enabled: true,

@@ -20,7 +20,8 @@ INSERT INTO public.system_settings (key, value) VALUES
   ('gifting_enabled',  'true'::JSONB),
   ('games_enabled',    'true'::JSONB),
   ('maintenance_mode', 'false'::JSONB),
-  ('maintenance_message', '"We''ll be right back. Maintenance in progress."'::JSONB)
+  ('maintenance_message', '"We''ll be right back. Maintenance in progress."'::JSONB),
+  ('maintenance_bypass_user_ids', '[]'::JSONB)
 ON CONFLICT (key) DO NOTHING;
 
 -- RLS — read open to all, write only by admins
