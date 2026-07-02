@@ -20,12 +20,31 @@ export default function Html5RoyalFeast({ roomId, myDiamonds, setMyDiamonds, onB
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [round, setRound] = useState(null);
+  const [gameReady, setGameReady] = useState(false);
   balanceRef.current = Number(myDiamonds) || 0;
 
   const send = useCallback((type, payload = {}) => {
     if (!readyRef.current || !webRef.current) return;
     const message = JSON.stringify({ version: 1, type, payload }).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
     webRef.current.injectJavaScript(`window.YoloGameBridge?.receive('${message}');true;`);
+  }, []);
+
+  const requestReadySignal = useCallback(() => {
+    if (!webRef.current || readyRef.current) return;
+    webRef.current.injectJavaScript(`
+      (function () {
+        try {
+          if (window.ReactNativeWebView && window.YoloGameBridge) {
+            window.ReactNativeWebView.postMessage(JSON.stringify({
+              version: 1,
+              type: 'GAME_READY',
+              payload: { gameId: '${GAME_ID}', source: 'native-load-check' }
+            }));
+          }
+        } catch (_) {}
+        true;
+      })();
+    `);
   }, []);
 
   const openRound = useCallback(async () => {
@@ -71,7 +90,7 @@ export default function Html5RoyalFeast({ roomId, myDiamonds, setMyDiamonds, onB
   }, [round?.sequence, openRound, send]);
 
   useEffect(() => {
-    if (!round?.round_id || !readyRef.current) return;
+    if (!round?.round_id || !gameReady) return;
     let firstPush = true;
     const pushState = () => {
       const timeLeft = Math.max(0, Math.ceil((new Date(endsAtRef.current).getTime() - Date.now()) / 1000));
@@ -100,7 +119,7 @@ export default function Html5RoyalFeast({ roomId, myDiamonds, setMyDiamonds, onB
     pushState();
     const timer = setInterval(pushState, 500);
     return () => clearInterval(timer);
-  }, [round?.sequence, openRound, send, setMyDiamonds]);
+  }, [round?.sequence, gameReady, openRound, send, setMyDiamonds]);
 
   const reply = useCallback((type, payload) => {
     send(type, payload);
@@ -113,6 +132,7 @@ export default function Html5RoyalFeast({ roomId, myDiamonds, setMyDiamonds, onB
     const payload = message.payload || {};
     if (message.type === 'GAME_READY') {
       readyRef.current = true;
+      setGameReady(true);
       setLoading(false);
       send('INIT', {
         playerName: user?.full_name || user?.name || 'Player',
@@ -177,6 +197,16 @@ export default function Html5RoyalFeast({ roomId, myDiamonds, setMyDiamonds, onB
         mediaPlaybackRequiresUserAction={false}
         setSupportMultipleWindows={false}
         onMessage={handleMessage}
+        onLoadStart={() => {
+          readyRef.current = false;
+          setGameReady(false);
+          setLoading(true);
+        }}
+        onLoadEnd={() => {
+          requestReadySignal();
+          setTimeout(requestReadySignal, 700);
+          setTimeout(requestReadySignal, 1800);
+        }}
         onError={({ nativeEvent }) => setError(nativeEvent.description || 'Game failed to load.')}
         onHttpError={({ nativeEvent }) => setError(`Game server returned ${nativeEvent.statusCode}.`)}
       />

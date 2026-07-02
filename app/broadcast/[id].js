@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { View, Text, StyleSheet, Image, TouchableOpacity, FlatList, TextInput, Platform, Dimensions, Modal, Alert, Keyboard, Animated, Easing, ScrollView, StatusBar, BackHandler, PanResponder, AppState } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { KeyboardEvents } from 'react-native-keyboard-controller';
 import { showCuteAlert, confirmCuteAlert } from '../../src/components/CuteAlert';
@@ -30,10 +31,12 @@ import { useAgoraEngine } from '../../src/hooks/useAgoraEngine';
 import { agoraUidFromId } from '../../src/api/agora';
 import { BRAND } from '../../src/theme/brand';
 import { useOneShotIntroPlayer } from '../../src/hooks/useOneShotIntroPlayer';
+import { flagFor } from '../../src/utils/countryFlag';
 
 const { width, height } = Dimensions.get('screen');
 const MALL_INTRO_MAX_HEIGHT = height * 0.92;
 const MALL_INTRO_WIDTH = width;
+const MALL_INTRO_PLAYED_STORAGE_PREFIX = 'mall_intro_played_v1';
 
 // ─────────────────────────────────────────────────────────────────────
 // Lucky Bag asset
@@ -66,6 +69,12 @@ const BUNDLED_INTRO_ASSETS = {
   'blue-roses.webp': require('../../assets/mall/intro/blue-roses.webp'),
   'blue-roses.m4v': require('../../assets/mall/intro/blue-roses.m4v'),
 };
+const AUDIO_SEAT_SCALE = 0.72;
+const AUDIO_SEAT_FRAME_SIZE = 88 * AUDIO_SEAT_SCALE;
+const AUDIO_SEAT_AVATAR_SIZE = 58 * AUDIO_SEAT_SCALE;
+const AUDIO_SEAT_EMPTY_SIZE = 62 * AUDIO_SEAT_SCALE;
+const AUDIO_SEAT_PROFILE_FRAME_SIZE = 96 * AUDIO_SEAT_SCALE;
+const AUDIO_SEAT_PULSE_SIZE = 70 * AUDIO_SEAT_SCALE;
 
 const mallIntroMediaSource = (url) => {
   if (typeof url === 'number') return url;
@@ -136,6 +145,12 @@ const GIFT_ITEMS_FALLBACK = [
   { id: '1', name: 'Rose', price: 10, category: 'Classic', loop: true, customDuration: 2500, source: require('../../assets/animation/Rose.json') },
 ];
 
+const formatProfileCount = (value) => {
+  const n = Number(value) || 0;
+  if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
+  return String(n);
+};
 
 export default function BroadcastRoomScreen() {
   const { id, mode, type, title: urlTitle, tag, siblings: siblingsCsv, myIdx: myIdxStr, streamId: prewarmedStreamId } = useLocalSearchParams();
@@ -403,6 +418,7 @@ export default function BroadcastRoomScreen() {
   }, [showViewerList, inviteFriends, user?.id]);
   const [showViewersModal, setShowViewersModal] = useState(false); // New: General viewer list
   const [selectedViewer, setSelectedViewer] = useState(null); // New: Profile popup target
+  const [profileModalLoading, setProfileModalLoading] = useState(false);
   const [isLiveEndedForViewer, setIsLiveEndedForViewer] = useState(false); // New: Show modal to viewer when host ends
   const [peakViewers, setPeakViewers] = useState(0);
 
@@ -454,17 +470,27 @@ export default function BroadcastRoomScreen() {
     userRef.current = user;
   }, [user]);
 
-  const broadcastMallIntroForUser = useCallback((introUser = userRef.current) => {
-    if (!channelRef.current || !introUser?.id || !introUser?.selectedMallIntro || !introUser?.selectedMallIntroVideoUrl) {
+  const broadcastMallIntroForUser = useCallback(async (introUser = userRef.current) => {
+    const liveStreamKey = streamRecordId ? String(streamRecordId) : null;
+    if (!liveStreamKey || !channelRef.current || !introUser?.id || !introUser?.selectedMallIntro || !introUser?.selectedMallIntroVideoUrl) {
       return;
     }
-    const userKey = `${id}:${introUser.id}`;
+    const userKey = `${liveStreamKey}:${introUser.id}`;
     if (sentMallIntroUserIdsRef.current.has(userKey)) return;
     sentMallIntroUserIdsRef.current.add(userKey);
+    const storageKey = `${MALL_INTRO_PLAYED_STORAGE_PREFIX}:${userKey}`;
+    try {
+      const alreadyPlayed = await AsyncStorage.getItem(storageKey);
+      if (alreadyPlayed) return;
+      await AsyncStorage.setItem(storageKey, '1');
+    } catch (e) {
+      if (__DEV__) console.warn('mall intro played storage:', e?.message || e);
+    }
     const payload = {
       id: introUser.id,
       ts: Date.now(),
       name: introUser.name || 'A viewer',
+      liveStreamId: liveStreamKey,
       introId: introUser.selectedMallIntro,
       videoUrl: introUser.selectedMallIntroVideoUrl,
       thumbnailUrl: introUser.selectedMallIntroThumbnailUrl,
@@ -479,7 +505,7 @@ export default function BroadcastRoomScreen() {
       });
     }
     channelRef.current.send({ type: 'broadcast', event: 'mall_intro', payload });
-  }, [id, queueMallIntro]);
+  }, [queueMallIntro, streamRecordId]);
 
   useEffect(() => {
     if (isHostView || !user?.id || !user?.selectedMallIntro || !user?.selectedMallIntroVideoUrl) return;
@@ -487,6 +513,7 @@ export default function BroadcastRoomScreen() {
   }, [
     broadcastMallIntroForUser,
     isHostView,
+    streamRecordId,
     user?.id,
     user?.selectedMallIntro,
     user?.selectedMallIntroVideoUrl,
@@ -1759,7 +1786,8 @@ export default function BroadcastRoomScreen() {
       })
       .on('broadcast', { event: 'mall_intro' }, ({ payload }) => {
         if (!payload?.id || !payload?.videoUrl) return;
-        const userKey = `${id}:${payload.id}`;
+        const introLiveKey = String(payload.liveStreamId || streamRecordId || id);
+        const userKey = `${introLiveKey}:${payload.id}`;
         if (playedMallIntroUserIdsRef.current.has(userKey)) return;
         playedMallIntroUserIdsRef.current.add(userKey);
         queueMallIntro({
@@ -2133,6 +2161,66 @@ export default function BroadcastRoomScreen() {
     if (!isAudio) return roomViewers;
     const seatedIds = new Set(activeGuests.filter(Boolean).map(g => g.id));
     return roomViewers.filter(v => v?.id && v.id !== stream.id && !seatedIds.has(v.id));
+  };
+
+  const openProfilePopup = async (person) => {
+    const targetId = person?.id === 'host' ? stream.id : person?.id;
+    if (!targetId) return;
+    const fallback = {
+      id: targetId,
+      name: person?.name || person?.full_name || (targetId === stream.id ? stream.broadcasterName : 'User'),
+      avatar: person?.avatar || person?.avatar_url || (targetId === stream.id ? stream.coverUrl : `https://i.pravatar.cc/150?u=${targetId}`),
+      displayId: person?.displayId || person?.display_id || null,
+      country: person?.country || null,
+      bio: person?.bio || null,
+      level: person?.level || 1,
+      followers: 0,
+      followingCount: 0,
+      visitors: person?.visitorCount || person?.visitors || 0,
+      following: followedIds.has(targetId),
+      selectedProfileFrame: person?.selectedProfileFrame || null,
+      selectedProfileFrameUrl: person?.selectedProfileFrameUrl || null,
+      loading: true,
+    };
+    setSelectedViewer(fallback);
+    setProfileModalLoading(true);
+    try {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', targetId)
+        .maybeSingle();
+      const [followersRes, followingRes, followingState] = await Promise.all([
+        supabase.from('follows').select('id', { count: 'exact', head: true }).eq('following_id', targetId),
+        supabase.from('follows').select('id', { count: 'exact', head: true }).eq('follower_id', targetId),
+        targetId === user?.id ? Promise.resolve(false) : checkFollowing(targetId),
+      ]);
+      const next = {
+        ...fallback,
+        loading: false,
+        name: profile?.full_name || fallback.name,
+        avatar: profile?.avatar_url || fallback.avatar,
+        displayId: profile?.display_id || fallback.displayId,
+        country: profile?.country || fallback.country,
+        bio: profile?.bio || fallback.bio,
+        level: profile?.level || fallback.level,
+        visitors: profile?.visitor_count ?? profile?.visitors ?? fallback.visitors,
+        followers: followersRes?.count || 0,
+        followingCount: followingRes?.count || 0,
+        following: !!followingState,
+        selectedProfileFrame: profile?.selected_profile_frame || profile?.selectedProfileFrame || fallback.selectedProfileFrame,
+        selectedProfileFrameUrl: profile?.selected_profile_frame_url || profile?.selectedProfileFrameUrl || fallback.selectedProfileFrameUrl,
+      };
+      setSelectedViewer((current) => current?.id === targetId ? next : current);
+      if (targetId !== user?.id && next.following) {
+        setFollowedIds((prev) => new Set(prev).add(targetId));
+      }
+    } catch (err) {
+      if (__DEV__) console.warn('profile popup fetch:', err?.message || err);
+      setSelectedViewer((current) => current?.id === targetId ? { ...current, loading: false } : current);
+    } finally {
+      setProfileModalLoading(false);
+    }
   };
 
   const handleViewersClick = async () => {
@@ -3096,7 +3184,7 @@ export default function BroadcastRoomScreen() {
               </TouchableOpacity>
 
               {/* Appointing admins is host-only */}
-              {isHostView && (
+              {isHostView && targetGuest?.id !== user?.id && (
                 <TouchableOpacity
                   style={styles.adminActionItem}
                   onPress={() => {
@@ -3114,7 +3202,7 @@ export default function BroadcastRoomScreen() {
 
             <View style={[styles.adminActionGrid, { marginTop: 15 }]}>
               {/* Permanent block is host-only — persists in DB across sessions */}
-              {isHostView && (
+              {isHostView && targetGuest?.id !== user?.id && (
                 <TouchableOpacity
                   style={styles.adminActionItem}
                   onPress={async () => {
@@ -3360,7 +3448,7 @@ export default function BroadcastRoomScreen() {
               </Text>
             }
             renderItem={({ item }) => (
-              <TouchableOpacity style={styles.viewerItem} onPress={() => setSelectedViewer(item)}>
+                  <TouchableOpacity style={styles.viewerItem} onPress={() => openProfilePopup(item)}>
                 <View style={styles.viewerItemLeft}>
                   <View style={styles.viewerAvatarWrapper}>
                     {item.isVIP ? (
@@ -3439,13 +3527,21 @@ export default function BroadcastRoomScreen() {
 
   const renderViewerProfileModal = () => {
     if (!selectedViewer) return null;
+    const countryFlag = flagFor(selectedViewer.country);
+    const isSelfProfile = selectedViewer.id === user?.id;
+    const isFollowingProfile = !!selectedViewer.following || followedIds.has(selectedViewer.id);
     return (
       <Modal animationType="fade" transparent={true} visible={!!selectedViewer} onRequestClose={() => setSelectedViewer(null)}>
         <View style={styles.modalOverlay}>
           <View style={styles.viewerProfileCard}>
             <View style={styles.cardGlowOverlay} />
+            <Text pointerEvents="none" style={[styles.profileDecorStar, styles.profileDecorStarLeft]}>★</Text>
+            <Text pointerEvents="none" style={[styles.profileDecorStar, styles.profileDecorStarRight]}>✦</Text>
+            <Text pointerEvents="none" style={[styles.profileDecorHeart]}>♥</Text>
             <TouchableOpacity style={styles.cardCloseBtn} onPress={() => setSelectedViewer(null)}>
-              <Ionicons name="close" size={20} color="#FFF" />
+              <LinearGradient colors={['#FF4FE1', '#6C35FF']} style={styles.cardCloseGradient}>
+                <Ionicons name="close" size={27} color="#FFF" />
+              </LinearGradient>
             </TouchableOpacity>
 
             <View style={styles.profileHeader}>
@@ -3456,10 +3552,10 @@ export default function BroadcastRoomScreen() {
                 )}
                 <View style={styles.levelRingGlow} />
                 <View style={styles.profileLevelBadge}>
-                  <Text style={styles.profileLevelText}>Lv.{selectedViewer.level}</Text>
+                  <Text style={styles.profileLevelText}>Lv.{selectedViewer.level || 1}</Text>
                 </View>
               </View>
-              <Text style={styles.profileNameLarge}>{selectedViewer.name}</Text>
+              <Text style={styles.profileNameLarge} numberOfLines={1}>{selectedViewer.name}</Text>
               {/* Display ID — sequential 202xxx number set by the signup
                   trigger and now shipped on every presence payload
                   (channel.track) so viewers see it without a profile
@@ -3470,48 +3566,84 @@ export default function BroadcastRoomScreen() {
               <Text style={styles.profileUserId}>
                 ID: {selectedViewer.displayId || selectedViewer.display_id || '—'}
               </Text>
+              <View style={styles.profileMetaPill}>
+                <Ionicons name="location-outline" size={14} color="#8BD8FF" />
+                <Text style={styles.profileMetaText}>{countryFlag ? `${countryFlag}  ` : ''}{selectedViewer.country || 'Global'}</Text>
+              </View>
             </View>
+
+            {profileModalLoading || selectedViewer.loading ? (
+              <View style={styles.profileLoadingBox}>
+                <LogoLoader size="small" />
+              </View>
+            ) : null}
 
             <View style={styles.profileStatsRow}>
               <View style={styles.pStatItem}>
-                <Text style={styles.pStatValue}>120</Text>
-                <Text style={styles.pStatLabel}>Following</Text>
-              </View>
-              <View style={styles.pStatDivider} />
-              <View style={styles.pStatItem}>
-                <Text style={styles.pStatValue}>4.5k</Text>
+                <Ionicons name="people" size={27} color="#20D8FF" />
+                <Text style={styles.pStatValue}>{formatProfileCount(selectedViewer.followers)}</Text>
                 <Text style={styles.pStatLabel}>Followers</Text>
               </View>
               <View style={styles.pStatDivider} />
               <View style={styles.pStatItem}>
-                <Text style={styles.pStatValue}>25k</Text>
-                <Text style={styles.pStatLabel}>Gifts Sent</Text>
+                <Ionicons name="person" size={27} color="#FF4FD8" />
+                <Text style={styles.pStatValue}>{formatProfileCount(selectedViewer.followingCount)}</Text>
+                <Text style={styles.pStatLabel}>Following</Text>
+              </View>
+              <View style={styles.pStatDivider} />
+              <View style={styles.pStatItem}>
+                <Ionicons name="eye" size={27} color="#FFD43A" />
+                <Text style={styles.pStatValue}>{formatProfileCount(selectedViewer.visitors)}</Text>
+                <Text style={styles.pStatLabel}>Visitors</Text>
               </View>
             </View>
 
+            <View style={styles.profileBioBox}>
+              <Text style={styles.profileBioLabel}>Bio</Text>
+              <Text style={styles.profileBioText}>{selectedViewer.bio || 'No bio yet.'}</Text>
+            </View>
+
             <View style={styles.profileActionsContainer}>
-              <TouchableOpacity style={styles.pActionMain} onPress={async () => { const ok = await followUser(selectedViewer.id); if (ok) showCuteAlert("Followed", `You followed ${selectedViewer.name}`); setSelectedViewer(null); }}>
-                <LinearGradient colors={[BRAND.primary, BRAND.primaryAlt]} style={styles.pActionGradient}>
-                  <Ionicons name="person-add" size={18} color="#FFF" />
-                  <Text style={styles.pActionText}>Follow</Text>
-                </LinearGradient>
-              </TouchableOpacity>
+              {!isSelfProfile && (
+                <TouchableOpacity
+                  style={styles.pActionMain}
+                  onPress={async () => {
+                    const ok = isFollowingProfile ? await unfollowUser(selectedViewer.id) : await followUser(selectedViewer.id);
+                    if (!ok) return;
+                    setFollowedIds((prev) => {
+                      const next = new Set(prev);
+                      if (isFollowingProfile) next.delete(selectedViewer.id); else next.add(selectedViewer.id);
+                      return next;
+                    });
+                    setSelectedViewer((current) => current ? {
+                      ...current,
+                      following: !isFollowingProfile,
+                      followers: Math.max(0, Number(current.followers || 0) + (isFollowingProfile ? -1 : 1)),
+                    } : current);
+                  }}
+                >
+                  <LinearGradient colors={isFollowingProfile ? ['#594376', '#382b62'] : [BRAND.primary, BRAND.primaryAlt]} style={styles.pActionGradient}>
+                    <Ionicons name={isFollowingProfile ? 'checkmark' : 'person-add'} size={26} color="#FFF" />
+                    <Text style={styles.pActionText}>{isFollowingProfile ? 'Following' : 'Follow'}</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              )}
 
               <View style={styles.pActionMiniRow}>
-                <TouchableOpacity style={styles.pActionMini} onPress={() => { setSelectedViewer(null); setShowGiftMenu(true); }}>
-                  <Ionicons name="gift" size={20} color="#FBBF24" />
+                {!isSelfProfile && <TouchableOpacity style={styles.pActionMini} onPress={() => { setSelectedViewer(null); setShowGiftMenu(true); }}>
+                  <Text style={styles.pActionEmoji}>🎁</Text>
                   <Text style={styles.pActionMiniText}>Gift</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.pActionMini}>
-                  <Ionicons name="chatbubble-ellipses" size={20} color="#38BDF8" />
+                </TouchableOpacity>}
+                {!isSelfProfile && <TouchableOpacity style={styles.pActionMini} onPress={() => { const targetId = selectedViewer.id; const targetName = encodeURIComponent(selectedViewer.name || 'User'); setSelectedViewer(null); router.push(`/main/chat/${targetId}?name=${targetName}`); }}>
+                  <Text style={styles.pActionEmoji}>💬</Text>
                   <Text style={styles.pActionMiniText}>Message</Text>
-                </TouchableOpacity>
-                {selectedViewer.id !== user?.id && (
+                </TouchableOpacity>}
+                {!isSelfProfile && (
                   <TouchableOpacity
                     style={styles.pActionMini}
                     onPress={() => { setReportTarget({ id: selectedViewer.id, name: selectedViewer.name }); setSelectedViewer(null); }}
                   >
-                    <Ionicons name="flag" size={20} color="#EF4444" />
+                    <Text style={styles.pActionEmoji}>🚩</Text>
                     <Text style={styles.pActionMiniText}>Report</Text>
                   </TouchableOpacity>
                 )}
@@ -3882,7 +4014,17 @@ export default function BroadcastRoomScreen() {
     <View style={[styles.topActions, { top: insets.top + 10 }]}>
       <View style={styles.topLeftContainer}>
         <View style={styles.broadcasterPanelWrapper}>
-          <TouchableOpacity style={styles.broadcasterPanel} onPress={() => !isHostView && setShowHostModal(true)} activeOpacity={0.8}>
+          <TouchableOpacity
+            style={styles.broadcasterPanel}
+            onPress={() => !isHostView && openProfilePopup({
+              id: stream.id,
+              name: stream.broadcasterName,
+              avatar: stream.coverUrl,
+              country: stream.country,
+              level: stream.level,
+            })}
+            activeOpacity={0.8}
+          >
             <View style={styles.hostAvatarWrapper}>
               <Image source={{ uri: stream.coverUrl }} style={styles.hostAvatarSmall} />
             </View>
@@ -4466,9 +4608,19 @@ export default function BroadcastRoomScreen() {
       );
     };
 
-    const renderHostCell = () => (
-      <View style={styles.seatSlot}>
-        <View style={styles.avatarWrapper}>
+  const renderHostCell = () => (
+    <View style={styles.seatSlot}>
+        <TouchableOpacity
+          activeOpacity={0.86}
+          style={styles.avatarWrapper}
+          onPress={() => openProfilePopup({
+            id: stream.id,
+            name: stream.broadcasterName,
+            avatar: stream.coverUrl,
+            country: stream.country,
+            level: stream.level,
+          })}
+        >
           <SpeakingPulse active={hostSpeaking} dynamicLevel={0} />
           <View style={[styles.seatAvatarRing, styles.seatAvatarRingHost, hostSpeaking && styles.speakingRing]}>
             <Image
@@ -4483,7 +4635,7 @@ export default function BroadcastRoomScreen() {
               <Ionicons name="mic-off" size={10} color="#EF4444" />
             </View>
           )}
-        </View>
+        </TouchableOpacity>
         <Text style={styles.seatName} numberOfLines={1}>{stream.broadcasterName}</Text>
         {renderEarningsBadge(stream.id)}
       </View>
@@ -4506,11 +4658,7 @@ export default function BroadcastRoomScreen() {
                   setTargetGuest(guest);
                   setShowAdminMenu(true);
                 } else {
-                  showCuteAlert("Guest Profile", `${guest.name} is on seat ${displayNumber}.`, [
-                    { text: "View Profile", onPress: () => guest.id && router.push(`/main/user/${guest.id}`) },
-                    { text: "Report", style: 'destructive', onPress: () => setReportTarget({ id: guest.id, name: guest.name }) },
-                    { text: "Close", style: "cancel" }
-                  ]);
+                  openProfilePopup(guest);
                 }
               }}
             >
@@ -7019,11 +7167,11 @@ const styles = StyleSheet.create({
 
   audioSeatsContainer: { alignItems: 'center', paddingHorizontal: 8 },
   seatGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', width: '100%', paddingTop: 8 },
-  seatSlot: { width: (width - 16) / 4, alignItems: 'center', marginBottom: isSmallScreen ? 20 : 27 },
+  seatSlot: { width: (width - 16) / 4, alignItems: 'center', marginBottom: isSmallScreen ? 12 : 16 },
   occupiedSeat: { alignItems: 'center' },
-  seatAvatar: { width: 58, height: 58, borderRadius: 29, backgroundColor: '#17095F' },
+  seatAvatar: { width: AUDIO_SEAT_AVATAR_SIZE, height: AUDIO_SEAT_AVATAR_SIZE, borderRadius: AUDIO_SEAT_AVATAR_SIZE / 2, backgroundColor: '#17095F' },
   seatAvatarRing: {
-    width: 62, height: 62, borderRadius: 31,
+    width: AUDIO_SEAT_EMPTY_SIZE, height: AUDIO_SEAT_EMPTY_SIZE, borderRadius: AUDIO_SEAT_EMPTY_SIZE / 2,
     borderWidth: 1.5, borderColor: 'rgba(117,202,255,.8)',
     justifyContent: 'center', alignItems: 'center',
     backgroundColor: 'rgba(45,17,135,.34)',
@@ -7031,26 +7179,26 @@ const styles = StyleSheet.create({
   seatAvatarRingHost: { borderColor: '#41D9FF', borderWidth: 2 },
   neonSeatFrame: {
     position: 'absolute',
-    width: 88,
-    height: 88,
+    width: AUDIO_SEAT_FRAME_SIZE,
+    height: AUDIO_SEAT_FRAME_SIZE,
     top: 0,
     left: 0,
     zIndex: 0,
   },
   seatProfileFrame: {
     position: 'absolute',
-    width: 96,
-    height: 96,
-    top: -17,
-    left: -17,
+    width: AUDIO_SEAT_PROFILE_FRAME_SIZE,
+    height: AUDIO_SEAT_PROFILE_FRAME_SIZE,
+    top: (AUDIO_SEAT_FRAME_SIZE - AUDIO_SEAT_PROFILE_FRAME_SIZE) / 2,
+    left: (AUDIO_SEAT_FRAME_SIZE - AUDIO_SEAT_PROFILE_FRAME_SIZE) / 2,
     zIndex: 8,
   },
   seatName: {
     color: '#FFF',
     fontSize: 10,
     fontWeight: '800',
-    marginTop: 9,
-    minWidth: 72,
+    marginTop: 6,
+    minWidth: 64,
     maxWidth: (width - 16) / 4 - 6,
     textAlign: 'center',
     paddingHorizontal: 7,
@@ -7084,11 +7232,11 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
   emptySeat: {
-    width: 88, height: 88, borderRadius: 44,
+    width: AUDIO_SEAT_FRAME_SIZE, height: AUDIO_SEAT_FRAME_SIZE, borderRadius: AUDIO_SEAT_FRAME_SIZE / 2,
     backgroundColor: 'rgba(66,35,157,.34)',
     justifyContent: 'center', alignItems: 'center',
   },
-  emptySeatNum: { color: '#E9E5FF', fontSize: 11, marginTop: 1, fontWeight: '800' },
+  emptySeatNum: { color: '#E9E5FF', fontSize: 9, marginTop: 0, fontWeight: '800' },
   seatNumTag: {
     position: 'absolute', top: -2, left: -2,
     backgroundColor: '#38BDF8',
@@ -7107,9 +7255,9 @@ const styles = StyleSheet.create({
 
   /* Pulse & Speaker Styles */
   pulseContainer: { ...StyleSheet.absoluteFillObject, justifyContent: 'center', alignItems: 'center', zIndex: -1 },
-  pulseCircle: { position: 'absolute', width: 70, height: 70, borderRadius: 35, backgroundColor: 'rgba(40,207,255,.3)', borderWidth: 1, borderColor: '#38D9FF' },
-  avatarWrapper: { width: 62, height: 62, justifyContent: 'center', alignItems: 'center' },
-  avatarRingSmall: { padding: 2, borderRadius: 32, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' },
+  pulseCircle: { position: 'absolute', width: AUDIO_SEAT_PULSE_SIZE, height: AUDIO_SEAT_PULSE_SIZE, borderRadius: AUDIO_SEAT_PULSE_SIZE / 2, backgroundColor: 'rgba(40,207,255,.3)', borderWidth: 1, borderColor: '#38D9FF' },
+  avatarWrapper: { width: AUDIO_SEAT_FRAME_SIZE, height: AUDIO_SEAT_FRAME_SIZE, justifyContent: 'center', alignItems: 'center' },
+  avatarRingSmall: { padding: 2, borderRadius: (AUDIO_SEAT_EMPTY_SIZE + 4) / 2, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' },
   speakingRing: { borderColor: '#38BDF8', borderWidth: 2, shadowColor: '#38BDF8', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.8, shadowRadius: 5 },
 
   /* Gifting Recipient Selector */
@@ -7673,30 +7821,77 @@ const styles = StyleSheet.create({
   viewerFollowText: { color: BRAND.primary, fontSize: 12, fontWeight: 'bold' },
 
   /* Viewer Profile Popup Styles */
-  viewerProfileCard: { width: width * 0.85, backgroundColor: BRAND.splashBg, borderRadius: 32, padding: 25, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', overflow: 'hidden' },
-  cardGlowOverlay: { position: 'absolute', top: -100, width: 300, height: 300, backgroundColor: 'rgba(255,46,126,0.1)', borderRadius: 150, zIndex: -1 },
-  cardCloseBtn: { position: 'absolute', top: 15, right: 15, width: 30, height: 30, borderRadius: 15, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center' },
-  profileHeader: { alignItems: 'center', marginBottom: 20 },
-  profileAvatarBox: { position: 'relative', marginBottom: 15 },
-  profileAvatarLarge: { width: 100, height: 100, borderRadius: 50, borderWidth: 4, borderColor: BRAND.primary },
-  viewerProfileFrameLarge: { position: 'absolute', width: 152, height: 152, top: -26, left: -26, zIndex: 8 },
-  levelRingGlow: { position: 'absolute', width: 110, height: 110, borderRadius: 55, borderWidth: 2, borderColor: 'rgba(255,46,126,0.3)', top: -5, left: -5 },
-  profileLevelBadge: { position: 'absolute', bottom: -5, right: 0, backgroundColor: '#FBBF24', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10, borderWidth: 2, borderColor: BRAND.splashBg },
+  viewerProfileCard: {
+    width: width * 0.9,
+    maxWidth: 390,
+    backgroundColor: 'rgba(10,12,92,0.96)',
+    borderRadius: 32,
+    padding: 24,
+    paddingTop: 28,
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#2FE2FF',
+    overflow: 'hidden',
+    shadowColor: '#FF38E8',
+    shadowOpacity: 0.9,
+    shadowRadius: 24,
+    elevation: 24,
+  },
+  cardGlowOverlay: { position: 'absolute', top: -120, left: -30, right: -30, height: 360, backgroundColor: 'rgba(216,43,255,0.18)', borderRadius: 180 },
+  profileDecorStar: { position: 'absolute', color: '#FFFFFF', fontSize: 24, textShadowColor: '#FF48F4', textShadowRadius: 10 },
+  profileDecorStarLeft: { left: 32, top: 58, color: '#79D7FF' },
+  profileDecorStarRight: { right: 42, top: 172, color: '#FFD43A' },
+  profileDecorHeart: { position: 'absolute', left: 28, bottom: 176, color: '#FF42CB', fontSize: 25, textShadowColor: '#FF42CB', textShadowRadius: 12 },
+  cardCloseBtn: { position: 'absolute', top: 18, right: 18, width: 58, height: 58, borderRadius: 29, overflow: 'hidden', borderWidth: 1.3, borderColor: 'rgba(255,255,255,0.6)', zIndex: 5 },
+  cardCloseGradient: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  profileHeader: { alignItems: 'center', marginBottom: 18, width: '100%' },
+  profileAvatarBox: { position: 'relative', marginBottom: 18 },
+  profileAvatarLarge: { width: 116, height: 116, borderRadius: 58, borderWidth: 4, borderColor: '#FFFFFF', backgroundColor: '#FFF' },
+  viewerProfileFrameLarge: { position: 'absolute', width: 172, height: 172, top: -28, left: -28, zIndex: 8 },
+  levelRingGlow: { position: 'absolute', width: 132, height: 132, borderRadius: 66, borderWidth: 2, borderColor: 'rgba(255,219,74,0.75)', top: -8, left: -8 },
+  profileLevelBadge: { position: 'absolute', bottom: -6, right: 2, backgroundColor: '#FBBF24', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10, borderWidth: 2, borderColor: BRAND.splashBg },
   profileLevelText: { color: '#FFF', fontSize: 10, fontWeight: 'bold' },
-  profileNameLarge: { color: '#FFF', fontSize: 22, fontWeight: 'bold' },
-  profileUserId: { color: 'rgba(255,255,255,0.4)', fontSize: 12, marginTop: 4 },
-  profileStatsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', width: '100%', marginBottom: 25, paddingVertical: 15, borderTopWidth: 1, borderBottomWidth: 1, borderColor: 'rgba(255,255,255,0.05)' },
+  profileNameLarge: { color: '#FFF', fontSize: 30, fontWeight: '900', textShadowColor: '#8E5BFF', textShadowRadius: 7, maxWidth: '82%' },
+  profileUserId: { color: 'rgba(255,255,255,0.72)', fontSize: 17, fontWeight: '800', marginTop: 4 },
+  profileMetaPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 13,
+    paddingHorizontal: 18,
+    height: 39,
+    borderRadius: 20,
+    backgroundColor: 'rgba(9,178,255,0.36)',
+    borderWidth: 1.5,
+    borderColor: '#20D8FF',
+  },
+  profileMetaText: { color: '#FFFFFF', fontSize: 16, fontWeight: '900' },
+  profileLoadingBox: { height: 34, alignItems: 'center', justifyContent: 'center', marginTop: -8, marginBottom: 4 },
+  profileStatsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', width: '100%', marginBottom: 14, paddingVertical: 16, borderWidth: 1.4, borderColor: 'rgba(47,226,255,0.65)', borderRadius: 20, backgroundColor: 'rgba(18,62,180,0.36)' },
   pStatItem: { alignItems: 'center', flex: 1 },
-  pStatValue: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
-  pStatLabel: { color: 'rgba(255,255,255,0.4)', fontSize: 10, marginTop: 2, textTransform: 'uppercase' },
-  pStatDivider: { width: 1, height: 20, backgroundColor: 'rgba(255,255,255,0.1)' },
+  pStatValue: { color: '#FFF', fontSize: 26, fontWeight: '900', marginTop: 5 },
+  pStatLabel: { color: 'rgba(255,255,255,0.78)', fontSize: 11, marginTop: 3, textTransform: 'uppercase', fontWeight: '800' },
+  pStatDivider: { width: 1.4, height: 70, backgroundColor: 'rgba(255,255,255,0.26)' },
+  profileBioBox: {
+    width: '100%',
+    minHeight: 74,
+    padding: 15,
+    borderRadius: 20,
+    backgroundColor: 'rgba(126,28,217,0.38)',
+    borderWidth: 1.4,
+    borderColor: '#ED4BFF',
+    marginBottom: 18,
+  },
+  profileBioLabel: { color: '#22F3FF', fontSize: 14, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 0.7, marginBottom: 8 },
+  profileBioText: { color: '#FFFFFF', fontSize: 16, lineHeight: 22, textAlign: 'center' },
   profileActionsContainer: { width: '100%' },
-  pActionMain: { width: '100%', height: 50, borderRadius: 25, overflow: 'hidden', marginBottom: 12 },
-  pActionGradient: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
-  pActionText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
+  pActionMain: { width: '100%', height: 62, borderRadius: 31, overflow: 'hidden', marginBottom: 14, borderWidth: 2, borderColor: 'rgba(255,255,255,0.74)' },
+  pActionGradient: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12 },
+  pActionText: { color: '#FFF', fontSize: 25, fontWeight: '900' },
   pActionMiniRow: { flexDirection: 'row', gap: 10, marginBottom: 15 },
-  pActionMini: { flex: 1, height: 44, backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 22, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
-  pActionMiniText: { color: '#FFF', fontSize: 14, fontWeight: '600' },
+  pActionMini: { flex: 1, minHeight: 58, backgroundColor: 'rgba(24,36,156,0.68)', borderRadius: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, borderWidth: 1.4, borderColor: 'rgba(47,226,255,0.76)' },
+  pActionEmoji: { fontSize: 24 },
+  pActionMiniText: { color: '#FFF', fontSize: 15, fontWeight: '900' },
   hostModRow: { flexDirection: 'row', gap: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.05)' },
   hostModBtn: { flex: 1, height: 40, borderRadius: 20, borderWidth: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
   hostModRow: { flexDirection: 'row', gap: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.05)' },

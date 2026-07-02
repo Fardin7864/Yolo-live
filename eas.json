@@ -28,7 +28,10 @@
         "buildType": "app-bundle"
       },
       "channel": "production",
-      "autoIncrement": true
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_ROYAL_FEAST_URL": "https://html5-games-seven.vercel.app/"
+      }
     }
   },
   "submit": {
