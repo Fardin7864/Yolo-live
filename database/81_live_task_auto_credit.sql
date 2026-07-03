@@ -1,8 +1,8 @@
 -- =====================================================================
 -- 81_live_task_auto_credit.sql
 -- =====================================================================
--- Product spec: "Every time a host opens a live and streams for 1 hour
--- straight, 5,000 beans land in their wallet automatically. No 30-min
+-- Product spec: "Every time a host opens a video live and streams for 1 hour
+-- straight, 6,000 beans land in their wallet automatically. No 30-min
 -- tier, no 2-hour tier, no daily cap — it's strictly PER LIVE SESSION."
 --
 -- This intentionally REPLACES the tiered daily task that migrations 70
@@ -10,7 +10,7 @@
 -- product owner decided one flat per-session reward beats a daily
 -- staircase that would let a host max out their bean payout by
 -- streaming once per day. With per-session, a host who streams 3
--- separate 1-hour lives in a day earns 15,000 beans; the staircase
+-- separate 1-hour video lives in a day earns 18,000 beans; the staircase
 -- model would have capped them at the daily 5,000.
 --
 -- WHAT THIS MIGRATION DOES
@@ -22,8 +22,8 @@
 --      stream row, default FALSE. Set to TRUE the first time the host
 --      crosses the 60-minute mark on that stream so the heartbeat can
 --      never re-pay.
---   3. Extends live_stream_heartbeat: if the stream has been live
---      ≥ 60 minutes and the flag is still false, grant 5,000 beans via
+--   3. Extends live_stream_heartbeat: if the video stream has been live
+--      ≥ 60 minutes and the flag is still false, grant 6,000 beans via
 --      grant_reward() and set the flag. Also fires a notification so
 --      the host sees a toast.
 --

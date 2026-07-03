@@ -22,7 +22,7 @@ module.exports = () => ({
     slug:                TENANT_CONFIG.slug,
     version:             '1.0.0',
     orientation:         'portrait',
-    icon:                './assets/splash-icon.png',
+    icon:                './assets/app-icon.png',
     userInterfaceStyle:  'dark',
     scheme:              TENANT_CONFIG.scheme,
     newArchEnabled:      true,
@@ -36,8 +36,8 @@ module.exports = () => ({
     },
     android: {
       adaptiveIcon: {
-        foregroundImage: './assets/splash-icon.png',
-        backgroundColor: TENANT_CONFIG.splashBg,
+        foregroundImage: './assets/app-icon.png',
+        backgroundColor: '#FFFFFF',
       },
       edgeToEdgeEnabled: true,
       permissions: [
@@ -52,7 +52,7 @@ module.exports = () => ({
       package: TENANT_CONFIG.bundleId,
     },
     web: {
-      favicon: './assets/splash-icon.png',
+      favicon: './assets/app-icon.png',
     },
     plugins: [
       'expo-router',

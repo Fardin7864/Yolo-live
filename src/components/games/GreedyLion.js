@@ -40,14 +40,14 @@ const A = {
 };
 
 const DEFAULT_ITEMS = [
-  { id: 'corn', label: 'Corn', category: 'salad', m: 5, image: A.corn, x: 24, y: 23 },
-  { id: 'chicken', label: 'Chicken', category: 'pizza', m: 45, image: A.chicken, x: 50, y: 12 },
-  { id: 'shrimp', label: 'Shrimp', category: 'pizza', m: 25, image: A.shrimp, x: 76, y: 23 },
-  { id: 'tomato', label: 'Tomato', category: 'salad', m: 5, image: A.tomato, x: 20, y: 49 },
-  { id: 'ham', label: 'Ham', category: 'pizza', m: 15, image: A.ham, x: 80, y: 49 },
-  { id: 'pepper', label: 'Pepper', category: 'salad', m: 5, image: A.pepper, x: 28, y: 70 },
-  { id: 'fish', label: 'Fish', category: 'pizza', m: 10, image: A.fish, x: 72, y: 70 },
-  { id: 'carrot', label: 'Carrot', category: 'salad', m: 5, image: A.carrot, x: 50, y: 78 },
+  { id: 'corn', label: 'Corn', category: 'salad', m: 5, image: A.corn, x: 24, y: 20 },
+  { id: 'chicken', label: 'Chicken', category: 'pizza', m: 45, image: A.chicken, x: 50, y: 9 },
+  { id: 'shrimp', label: 'Shrimp', category: 'pizza', m: 25, image: A.shrimp, x: 76, y: 20 },
+  { id: 'tomato', label: 'Tomato', category: 'salad', m: 5, image: A.tomato, x: 20, y: 45 },
+  { id: 'ham', label: 'Ham', category: 'pizza', m: 15, image: A.ham, x: 80, y: 45 },
+  { id: 'pepper', label: 'Pepper', category: 'salad', m: 5, image: A.pepper, x: 28, y: 66 },
+  { id: 'fish', label: 'Fish', category: 'pizza', m: 10, image: A.fish, x: 72, y: 66 },
+  { id: 'carrot', label: 'Carrot', category: 'salad', m: 5, image: A.carrot, x: 50, y: 74 },
 ];
 
 const itemImageById = DEFAULT_ITEMS.reduce((acc, item) => ({ ...acc, [item.id]: item.image }), {});
@@ -113,7 +113,7 @@ export default function GreedyLion({
   const fetchTimerRef = useRef(null);
 
   const boardW = Math.min(width - 18, standalone ? 430 : width - 18);
-  const boardH = Math.min(height - 10, standalone ? height - 10 : 700);
+  const boardH = Math.min(height - 2, standalone ? height - 2 : 720);
   const itemSize = Math.max(78, Math.min(112, boardW * 0.25));
   const categorySize = Math.max(88, Math.min(132, boardW * 0.24));
 
@@ -153,9 +153,7 @@ export default function GreedyLion({
     setRound(nextRound);
     setStatus(nextRound?.status || 'loading');
     setBetRows(Array.isArray(payload.bets) ? payload.bets : []);
-    setHistory(Array.isArray(payload.history)
-      ? payload.history.filter((row) => row?.result?.is_empty_round !== true && Number(row?.total_bet ?? 1) !== 0).slice(0, 15)
-      : []);
+    setHistory(Array.isArray(payload.history) ? payload.history.slice(0, 15) : []);
 
     const result = nextRound?.result || {};
     const winner = result?.winner_pos || nextRound?.winner_pos || result?.category;
@@ -352,11 +350,11 @@ export default function GreedyLion({
     <View style={[styles.shell, { width: boardW, maxHeight: boardH }]}>
       <LinearGradient colors={['#1E0C49', '#160532']} style={styles.topbar}>
         <TouchableOpacity onPress={onBack} style={styles.iconButton}>
-          <Ionicons name="chevron-back" size={25} color="#FFFFFF" />
+          <Ionicons name="chevron-back" size={22} color="#FFFFFF" />
         </TouchableOpacity>
         <Text style={styles.gameTitle}>Greedy Lion</Text>
         <TouchableOpacity onPress={onClose || onBack} style={styles.iconButton}>
-          <Ionicons name="close" size={25} color="#FFFFFF" />
+          <Ionicons name="close" size={22} color="#FFFFFF" />
         </TouchableOpacity>
       </LinearGradient>
 
@@ -365,21 +363,21 @@ export default function GreedyLion({
           <View style={styles.darkOverlay} />
           <View style={styles.hudRow}>
             <View style={styles.roundPill}>
-              <Ionicons name="trophy" size={18} color="#FBD35D" />
+              <Ionicons name="trophy" size={16} color="#FBD35D" />
               <Text style={styles.roundText}>Round: {roundId ? String(roundId).slice(-5) : '...'}</Text>
             </View>
             <View style={styles.hudButtons}>
               <TouchableOpacity onPress={() => setHelpOpen(true)} style={styles.squareButton}>
-                <Ionicons name="help" size={26} color="#FFFFFF" />
+                <Ionicons name="help" size={23} color="#FFFFFF" />
               </TouchableOpacity>
               <TouchableOpacity onPress={() => setMuted((v) => !v)} style={styles.squareButton}>
-                <Ionicons name={muted ? 'volume-mute' : 'volume-high'} size={22} color="#BDF3FF" />
+                <Ionicons name={muted ? 'volume-mute' : 'volume-high'} size={20} color="#BDF3FF" />
               </TouchableOpacity>
             </View>
           </View>
 
-          <View style={[styles.wheelWrap, { height: Math.min(428, boardW * 1.02) }]}>
-            <Image source={A.wheel} style={[styles.wheel, { width: Math.min(boardW * 1.03, 432), height: Math.min(boardW * 1.03, 432) }]} resizeMode="contain" />
+          <View style={[styles.wheelWrap, { height: Math.min(404, boardW * 0.98) }]}>
+            <Image source={A.wheel} style={[styles.wheel, { width: Math.min(boardW * 1.02, 424), height: Math.min(boardW * 1.02, 424) }]} resizeMode="contain" />
             <View style={styles.centerMascot}>
               <Image source={A.cat} style={styles.cat} resizeMode="contain" />
               <Text style={styles.centerTitle}>{title}</Text>
@@ -565,53 +563,53 @@ export default function GreedyLion({
 }
 
 const styles = StyleSheet.create({
-  host: { alignItems: 'center', justifyContent: 'center' },
+  host: { alignItems: 'center', justifyContent: 'flex-start' },
   shell: {
     alignSelf: 'center',
     overflow: 'hidden',
-    borderTopLeftRadius: 26,
-    borderTopRightRadius: 26,
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
     backgroundColor: '#08001C',
   },
-  topbar: { height: 62, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14 },
-  iconButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-  gameTitle: { color: '#FFF2BF', fontSize: 20, fontWeight: '900' },
-  scrollBody: { paddingBottom: 24, backgroundColor: '#07001C' },
-  board: { minHeight: 520, overflow: 'hidden' },
+  topbar: { height: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14 },
+  iconButton: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
+  gameTitle: { color: '#FFF2BF', fontSize: 18, fontWeight: '900' },
+  scrollBody: { paddingBottom: 14, backgroundColor: '#07001C' },
+  board: { minHeight: 482, overflow: 'hidden' },
   boardImage: { opacity: 1 },
   darkOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(5,0,27,.48)' },
-  hudRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 14, zIndex: 4 },
+  hudRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 12, paddingTop: 8, paddingBottom: 2, zIndex: 4 },
   roundPill: {
-    minWidth: 138,
-    height: 50,
-    borderRadius: 18,
+    minWidth: 118,
+    height: 40,
+    borderRadius: 14,
     borderWidth: 2,
     borderColor: '#F6C44F',
     backgroundColor: 'rgba(31,11,63,.9)',
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 14,
-    gap: 8,
+    paddingHorizontal: 11,
+    gap: 7,
   },
-  roundText: { color: '#FFFFFF', fontSize: 15, fontWeight: '900' },
-  hudButtons: { flexDirection: 'row', gap: 10 },
+  roundText: { color: '#FFFFFF', fontSize: 13, fontWeight: '900' },
+  hudButtons: { flexDirection: 'row', gap: 8 },
   squareButton: {
-    width: 50,
-    height: 50,
-    borderRadius: 16,
+    width: 42,
+    height: 42,
+    borderRadius: 14,
     borderWidth: 2,
     borderColor: '#F7D56A',
     backgroundColor: 'rgba(46,16,91,.92)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  wheelWrap: { marginTop: -8, marginHorizontal: 0, alignItems: 'center', justifyContent: 'center' },
-  wheel: { position: 'absolute', top: '5%', alignSelf: 'center', zIndex: 1 },
-  centerMascot: { position: 'absolute', top: '30%', left: '33%', width: '34%', alignItems: 'center', zIndex: 6 },
-  cat: { width: 98, height: 86 },
-  centerTitle: { color: '#FFFFFF', fontSize: 17, fontWeight: '900', textShadowColor: '#210020', textShadowRadius: 6, marginTop: -11 },
-  timerPill: { minWidth: 56, height: 28, borderRadius: 14, backgroundColor: '#FFC04C', alignItems: 'center', justifyContent: 'center', marginTop: 4, paddingHorizontal: 10 },
-  timerText: { color: '#3F0B4B', fontSize: 17, fontWeight: '900' },
+  wheelWrap: { marginTop: -16, marginHorizontal: 0, alignItems: 'center', justifyContent: 'center' },
+  wheel: { position: 'absolute', top: '0%', alignSelf: 'center', zIndex: 1 },
+  centerMascot: { position: 'absolute', top: '27%', left: '33%', width: '34%', alignItems: 'center', zIndex: 6 },
+  cat: { width: 90, height: 80 },
+  centerTitle: { color: '#FFFFFF', fontSize: 15, fontWeight: '900', textShadowColor: '#210020', textShadowRadius: 6, marginTop: -12 },
+  timerPill: { minWidth: 50, height: 24, borderRadius: 12, backgroundColor: '#FFC04C', alignItems: 'center', justifyContent: 'center', marginTop: 3, paddingHorizontal: 9 },
+  timerText: { color: '#3F0B4B', fontSize: 15, fontWeight: '900' },
   itemCard: {
     position: 'absolute',
     zIndex: 5,
@@ -657,33 +655,33 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-end',
-    paddingHorizontal: 34,
-    marginTop: -70,
+    paddingHorizontal: 38,
+    marginTop: -88,
     paddingBottom: 0,
     zIndex: 30,
     elevation: 30,
   },
   categoryTouch: { zIndex: 31, elevation: 31 },
   categoryImage: { shadowColor: '#000', shadowOpacity: .45, shadowRadius: 12, zIndex: 32, elevation: 32 },
-  betPanel: { marginHorizontal: 18, marginTop: -14, borderRadius: 16, borderWidth: 3, borderColor: '#E8B74E', paddingHorizontal: 8, paddingVertical: 7 },
-  panelHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12, marginBottom: 5 },
-  panelTitle: { color: '#FFFFFF', fontSize: 12, fontWeight: '900' },
-  panelDivider: { width: 1, height: 16, backgroundColor: 'rgba(255,255,255,.35)' },
-  amountRow: { flexDirection: 'row', gap: 6 },
+  betPanel: { marginHorizontal: 18, marginTop: -22, borderRadius: 15, borderWidth: 3, borderColor: '#E8B74E', paddingHorizontal: 8, paddingVertical: 6 },
+  panelHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 4 },
+  panelTitle: { color: '#FFFFFF', fontSize: 11, fontWeight: '900' },
+  panelDivider: { width: 1, height: 14, backgroundColor: 'rgba(255,255,255,.35)' },
+  amountRow: { flexDirection: 'row', gap: 5 },
   amountTouch: { flex: 1 },
-  amountChip: { height: 32, borderRadius: 10, borderWidth: 2, borderColor: '#D8A33D', backgroundColor: 'rgba(255,255,255,.08)', alignItems: 'center', justifyContent: 'center' },
+  amountChip: { height: 29, borderRadius: 9, borderWidth: 2, borderColor: '#D8A33D', backgroundColor: 'rgba(255,255,255,.08)', alignItems: 'center', justifyContent: 'center' },
   amountChipActive: { backgroundColor: '#FFC55D', borderColor: '#FFF4A2' },
-  amountText: { color: '#FFFFFF', fontSize: 13, fontWeight: '900' },
+  amountText: { color: '#FFFFFF', fontSize: 12, fontWeight: '900' },
   amountTextActive: { color: '#40104E' },
   messageText: { color: '#FFE7A2', textAlign: 'center', fontSize: 9, fontWeight: '800', marginTop: 3 },
-  resultPanel: { marginHorizontal: 18, marginTop: 5, borderRadius: 16, borderWidth: 3, borderColor: '#D8A33D', paddingHorizontal: 7, paddingVertical: 5, minHeight: 68 },
-  resultTitle: { color: '#FFFFFF', textAlign: 'center', fontSize: 14, fontWeight: '900', marginBottom: 2 },
+  resultPanel: { marginHorizontal: 18, marginTop: 4, borderRadius: 15, borderWidth: 3, borderColor: '#D8A33D', paddingHorizontal: 7, paddingVertical: 4, minHeight: 62 },
+  resultTitle: { color: '#FFFFFF', textAlign: 'center', fontSize: 13, fontWeight: '900', marginBottom: 1 },
   historyRail: { gap: 6, alignItems: 'center', minWidth: '100%' },
   emptyHistory: { color: '#D8C4EF', fontSize: 12, fontWeight: '800', textAlign: 'center', width: '100%', marginTop: 8 },
-  historyItem: { width: 48, height: 44, borderRadius: 8, borderWidth: 2, borderColor: '#F2CA68', backgroundColor: '#F4D5A8', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
-  historyImage: { width: 44, height: 28 },
-  newText: { position: 'absolute', bottom: 10, color: '#FF3131', fontSize: 7, fontWeight: '900' },
-  historyText: { position: 'absolute', bottom: 1, color: '#371447', fontSize: 8, fontWeight: '900' },
+  historyItem: { width: 56, height: 48, borderRadius: 8, borderWidth: 2, borderColor: '#F2CA68', backgroundColor: '#F4D5A8', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  historyImage: { width: 58, height: 42 },
+  newText: { position: 'absolute', bottom: 12, color: '#FF3131', fontSize: 7, fontWeight: '900' },
+  historyText: { position: 'absolute', bottom: 0, color: '#371447', fontSize: 8, fontWeight: '900' },
   footerRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 18, marginTop: 8 },
   balanceCard: { flex: 1, minHeight: 50, borderRadius: 14, borderWidth: 2, borderColor: '#F8D783', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8 },
   avatar: { width: 38, height: 38, marginRight: 6 },

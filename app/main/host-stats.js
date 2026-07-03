@@ -2,7 +2,7 @@
  * Host Stats Dashboard
  * ====================
  * Shows the broadcaster a one-page summary of how they're doing:
- *   - Live minutes, sessions, gifts received, diamonds earned
+ *   - Live minutes, live days, gifts received, diamonds earned
  *   - Three time windows: Today, Last 7 days, All-time (segmented control)
  *   - Recent 10 sessions list with per-session breakdown
  *
@@ -156,7 +156,7 @@ export default function HostStatsScreen() {
         <StatTile
           icon="radio"
           color="#38BDF8"
-          label="Sessions"
+          label="Live Days"
           value={compactNumber(current.sessions)}
         />
       </View>

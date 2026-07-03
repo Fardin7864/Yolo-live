@@ -2395,7 +2395,7 @@ export default function BroadcastRoomScreen() {
   // actually wrote to the DB — it just bumped local state, vanished
   // on refresh, and confused hosts who thought they were paid in
   // diamonds. The REAL reward is server-side: migration 81's
-  // live_stream_heartbeat grants 5,000 beans the moment a stream
+  // live_stream_heartbeat grants 6,000 beans the moment a video stream
   // crosses 60 minutes, atomically via live_streams.hour_reward_credited.
   // We read that flag back here so the summary shows the real
   // reward exactly when it actually landed in the wallet.
@@ -2442,7 +2442,7 @@ export default function BroadcastRoomScreen() {
             .maybeSingle(),
         ]);
         if (hourReadResult?.data?.hour_reward_credited) {
-          setFinalSummaryData((prev) => ({ ...prev, hourBeans: 5000 }));
+          setFinalSummaryData((prev) => ({ ...prev, hourBeans: 6000 }));
         }
       } catch (_) {}
     }
