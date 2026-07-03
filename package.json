@@ -1,7 +1,7 @@
 {
   "name": "yolo-live",
   "version": "1.0.0",
-  "main": "expo-router/entry",
+  "main": "index.js",
   "scripts": {
     "start": "expo start",
     "android": "expo run:android",
@@ -11,6 +11,10 @@
   "dependencies": {
     "@lottiefiles/dotlottie-react": "^0.19.6",
     "@react-native-async-storage/async-storage": "2.2.0",
+    "@react-native-firebase/analytics": "^25.1.0",
+    "@react-native-firebase/app": "^25.1.0",
+    "@react-native-firebase/crashlytics": "^25.1.0",
+    "@react-native-firebase/messaging": "^25.1.0",
     "@react-native-google-signin/google-signin": "^16.1.2",
     "@supabase/supabase-js": "^2.101.1",
     "babel-preset-expo": "~54.0.10",

@@ -56,6 +56,10 @@ module.exports = () => ({
       favicon: './assets/app-icon.png',
     },
     plugins: [
+      '@react-native-firebase/app',
+      '@react-native-firebase/analytics',
+      '@react-native-firebase/crashlytics',
+      '@react-native-firebase/messaging',
       'expo-router',
       'expo-video',
       [

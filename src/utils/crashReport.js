@@ -1,6 +1,7 @@
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 import { supabase } from '../api/supabase';
+import { recordFirebaseError } from '../lib/firebase';
 
 /**
  * Self-hosted crash reporting helper.
@@ -27,9 +28,20 @@ const APP_VERSION = Constants.expoConfig?.version
   ?? '0.0.0';
 
 export async function logCrash(err, opts = {}) {
+  const message = (err && (err.message || String(err))) || 'unknown';
+  const stack   = (err && err.stack) || null;
+
+  recordFirebaseError(err, {
+    screen: opts.screen || 'unknown',
+    isFatal: opts.context?.isFatal,
+    context: {
+      platform: Platform.OS,
+      app_version: APP_VERSION,
+      ...opts.context,
+    },
+  });
+
   try {
-    const message = (err && (err.message || String(err))) || 'unknown';
-    const stack   = (err && err.stack) || null;
     await supabase.rpc('log_app_error', {
       p_message:     message,
       p_stack:       stack,

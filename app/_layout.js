@@ -1,18 +1,27 @@
 import { useEffect } from 'react';
 import { ImageBackground, StyleSheet } from 'react-native';
-import { Stack } from 'expo-router';
+import { Stack, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
-import { GlobalStateProvider } from '../src/context/GlobalStateContext';
+import { GlobalStateProvider, useGlobalState } from '../src/context/GlobalStateContext';
 import MaintenanceGate from '../src/components/MaintenanceGate';
 import { CuteAlertHost } from '../src/components/CuteAlert';
 import ErrorBoundary from '../src/components/ErrorBoundary';
 import ForceUpdateGate from '../src/components/ForceUpdateGate';
 import RemoteSplashGate from '../src/components/RemoteSplashGate';
 import { installGlobalErrorHandler } from '../src/utils/crashReport';
+import { ensureNotificationPermission } from '../src/utils/notifPermission';
 import { configureAudioSession } from '../src/audio/audioSession';
+import {
+  clearFirebaseUser,
+  identifyFirebaseUser,
+  startFirebaseMessagingListeners,
+  syncCurrentPushToken,
+  trackScreenView,
+  unregisterCurrentPushToken,
+} from '../src/lib/firebase';
 import "../global.css";
 
 const APP_BACKGROUND = require('../assets/backgrounds/neon-space.png');
@@ -41,6 +50,9 @@ configureAudioSession();
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
 function RootContent() {
+  const pathname = usePathname();
+  const { user, role } = useGlobalState();
+
   useEffect(() => {
     // Hide the native splash one frame after mount. By this point the
     // RemoteSplashGate sibling has already painted its first frame
@@ -52,6 +64,42 @@ function RootContent() {
     }, 50);
     return () => clearTimeout(t);
   }, []);
+
+  useEffect(() => {
+    trackScreenView(pathname);
+  }, [pathname]);
+
+  useEffect(() => {
+    const stop = startFirebaseMessagingListeners();
+    return () => {
+      try { stop?.(); } catch (_) {}
+    };
+  }, []);
+
+  useEffect(() => {
+    if (user?.id) {
+      identifyFirebaseUser({
+        id: user.id,
+        role,
+        vipType: user.vipType,
+      });
+    } else {
+      clearFirebaseUser();
+    }
+  }, [user?.id, user?.vipType, role]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+
+    if (user.pushNotificationsEnabled === false) {
+      unregisterCurrentPushToken();
+      return;
+    }
+
+    ensureNotificationPermission()
+      .then(() => syncCurrentPushToken())
+      .catch(() => {});
+  }, [user?.id, user?.pushNotificationsEnabled]);
 
   return (
     <KeyboardProvider>
