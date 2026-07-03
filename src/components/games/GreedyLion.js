@@ -45,9 +45,9 @@ const DEFAULT_ITEMS = [
   { id: 'shrimp', label: 'Shrimp', category: 'pizza', m: 25, image: A.shrimp, x: 76, y: 20 },
   { id: 'tomato', label: 'Tomato', category: 'salad', m: 5, image: A.tomato, x: 20, y: 45 },
   { id: 'ham', label: 'Ham', category: 'pizza', m: 15, image: A.ham, x: 80, y: 45 },
-  { id: 'pepper', label: 'Pepper', category: 'salad', m: 5, image: A.pepper, x: 28, y: 66 },
-  { id: 'fish', label: 'Fish', category: 'pizza', m: 10, image: A.fish, x: 72, y: 66 },
-  { id: 'carrot', label: 'Carrot', category: 'salad', m: 5, image: A.carrot, x: 50, y: 74 },
+  { id: 'pepper', label: 'Pepper', category: 'salad', m: 5, image: A.pepper, x: 28, y: 73 },
+  { id: 'fish', label: 'Fish', category: 'pizza', m: 10, image: A.fish, x: 72, y: 73 },
+  { id: 'carrot', label: 'Carrot', category: 'salad', m: 5, image: A.carrot, x: 50, y: 82 },
 ];
 
 const itemImageById = DEFAULT_ITEMS.reduce((acc, item) => ({ ...acc, [item.id]: item.image }), {});
@@ -114,7 +114,7 @@ export default function GreedyLion({
 
   const boardW = Math.min(width - 18, standalone ? 430 : width - 18);
   const boardH = Math.min(height - 2, standalone ? height - 2 : 720);
-  const itemSize = Math.max(78, Math.min(112, boardW * 0.25));
+  const itemSize = Math.max(68, Math.min(98, boardW * 0.22));
   const categorySize = Math.max(88, Math.min(132, boardW * 0.24));
 
   const roundId = round?.id || null;
@@ -152,7 +152,17 @@ export default function GreedyLion({
     if (typeof payload.my_balance === 'number') setWallet?.(Number(payload.my_balance));
     setRound(nextRound);
     setStatus(nextRound?.status || 'loading');
-    setBetRows(Array.isArray(payload.bets) ? payload.bets : []);
+    const serverBets = Array.isArray(payload.bets) ? payload.bets : [];
+    setBetRows((currentRows) => {
+      const serverIds = new Set(serverBets.map((row) => row.id));
+      const keepLocalRows = currentRows.filter((row) => (
+        row?._localUntil
+        && row.round_id === nextRound?.id
+        && row._localUntil > Date.now()
+        && !serverIds.has(row.id)
+      ));
+      return [...serverBets, ...keepLocalRows];
+    });
     setHistory(Array.isArray(payload.history) ? payload.history.slice(0, 15) : []);
 
     const result = nextRound?.result || {};
@@ -307,7 +317,7 @@ export default function GreedyLion({
       return;
     }
 
-    const tempId = `temp-${Date.now()}-${item.id}`;
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}-${item.id}`;
     const tempRow = {
       id: tempId,
       round_id: roundId,
@@ -316,6 +326,7 @@ export default function GreedyLion({
       amount: selectedAmount,
       win_amount: 0,
       _optimistic: true,
+      _localUntil: Date.now() + 5000,
     };
     setMessage(`${item.label} +${compact(selectedAmount)}`);
     setBetRows((cur) => [...cur, tempRow]);
@@ -336,7 +347,12 @@ export default function GreedyLion({
     }
 
     if (typeof data.balance === 'number') setWallet?.(Number(data.balance));
-    setBetRows((cur) => cur.map((row) => row.id === tempId ? { ...row, id: data.bet_id, _optimistic: false } : row));
+    setBetRows((cur) => cur.map((row) => row.id === tempId ? {
+      ...row,
+      id: data.bet_id,
+      _optimistic: false,
+      _localUntil: Date.now() + 5000,
+    } : row));
   };
 
   const title = status === 'settled'
@@ -415,7 +431,6 @@ export default function GreedyLion({
                 >
                   {locked ? <View style={styles.itemLockedOverlay} pointerEvents="none" /> : null}
                   <Image source={item.image} style={styles.itemImage} resizeMode="contain" />
-                  <Text style={styles.itemMult}>x{item.m}</Text>
                   {itemBets[item.id] ? <Text style={styles.itemBet}>{compact(itemBets[item.id])}</Text> : null}
                 </TouchableOpacity>
               );
@@ -604,8 +619,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   wheelWrap: { marginTop: -16, marginHorizontal: 0, alignItems: 'center', justifyContent: 'center' },
-  wheel: { position: 'absolute', top: '0%', alignSelf: 'center', zIndex: 1 },
-  centerMascot: { position: 'absolute', top: '27%', left: '33%', width: '34%', alignItems: 'center', zIndex: 6 },
+  wheel: { position: 'absolute', top: '-6%', alignSelf: 'center', zIndex: 1 },
+  centerMascot: { position: 'absolute', top: '30%', left: '35%', width: '34%', alignItems: 'center', zIndex: 6 },
   cat: { width: 90, height: 80 },
   centerTitle: { color: '#FFFFFF', fontSize: 15, fontWeight: '900', textShadowColor: '#210020', textShadowRadius: 6, marginTop: -12 },
   timerPill: { minWidth: 50, height: 24, borderRadius: 12, backgroundColor: '#FFC04C', alignItems: 'center', justifyContent: 'center', marginTop: 3, paddingHorizontal: 9 },
@@ -634,29 +649,26 @@ const styles = StyleSheet.create({
     shadowOpacity: .45,
     shadowRadius: 6,
   },
-  itemMult: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '900',
-    lineHeight: 21,
-    textShadowColor: '#270038',
-    textShadowRadius: 4,
-    marginTop: -3,
-  },
   itemBet: {
-    color: '#FFE28B',
-    fontSize: 14,
+    color: '#FFFFFF',
+    fontSize: 15,
     fontWeight: '900',
-    lineHeight: 17,
+    lineHeight: 18,
     textShadowColor: '#270038',
     textShadowRadius: 4,
+    marginTop: -2,
+    backgroundColor: 'rgba(10,0,30,.72)',
+    borderRadius: 9,
+    overflow: 'hidden',
+    paddingHorizontal: 6,
+    paddingVertical: 1,
   },
   categoryRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-end',
     paddingHorizontal: 38,
-    marginTop: -88,
+    marginTop: -40,
     paddingBottom: 0,
     zIndex: 30,
     elevation: 30,
