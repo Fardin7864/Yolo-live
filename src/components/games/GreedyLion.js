@@ -26,6 +26,8 @@ const FALLBACK_POLL_MS = 20000;
 const TIMER_TICK_MS = 1000;
 const BETTING_CLOSE_SAFETY_MS = 0;
 const BETTING_DISPLAY_GRACE_MS = 120;
+const BET_ACCEPTANCE_GRACE_SECONDS = 10;
+const SPIN_GRACE_STEP_MS = 110;
 const REVEAL_STEP_MS = 70;
 const REVEAL_BASE_STEPS = 26;
 const POPUP_DELAY_MS = 500;
@@ -265,11 +267,13 @@ function GreedyLion({
   const [clockOffsetMs, setClockOffsetMs] = useState(0);
   const [revealSpinIndex, setRevealSpinIndex] = useState(-1);
   const [revealLandingCategory, setRevealLandingCategory] = useState(null);
+  const [roundPhase, setRoundPhase] = useState('loading');
 
   const resultShownRef = useRef(null);
   const resultPopupRef = useRef(null);
   const resultGateOpenRef = useRef(false);
   const revealTimersRef = useRef([]);
+  const spinLoopRef = useRef(null);
   const fetchTimerRef = useRef(null);
   const realtimeDebounceRef = useRef(null);
   const fetchInFlightRef = useRef(false);
@@ -294,6 +298,16 @@ function GreedyLion({
   const roundId = round?.id || null;
   const endsAt = round?.ends_at || null;
   const displaySeconds = Number(settings?.result_display_s || POPUP_SECONDS);
+  const timingRules = useMemo(() => {
+    const rawRules = settings?.special_result_rules;
+    return typeof rawRules === 'string'
+      ? (() => { try { return JSON.parse(rawRules); } catch (_) { return null; } })()
+      : rawRules;
+  }, [settings?.special_result_rules]);
+  const betGraceSeconds = useMemo(() => {
+    const nextGrace = Number(timingRules?.bet_acceptance_grace_s ?? BET_ACCEPTANCE_GRACE_SECONDS);
+    return Number.isFinite(nextGrace) ? Math.max(0, Math.min(30, nextGrace)) : BET_ACCEPTANCE_GRACE_SECONDS;
+  }, [timingRules]);
 
   const myBetRows = useMemo(
     () => betRows.filter((row) => row.user_id === user?.id || row.user_id === 'demo'),
@@ -407,10 +421,26 @@ function GreedyLion({
     return endMs - serverNowMs;
   }, [clockOffsetMs]);
 
+  const getSettledAtMs = useCallback((roundLike) => {
+    const rawSettledAt = roundLike?.result?.settled_at || roundLike?.settled_at;
+    const settledAtMs = rawSettledAt ? new Date(rawSettledAt).getTime() : NaN;
+    if (Number.isFinite(settledAtMs)) return settledAtMs;
+    const endMs = new Date(roundLike?.ends_at || Date.now()).getTime();
+    return Number.isFinite(endMs) ? endMs + betGraceSeconds * 1000 : Date.now();
+  }, [betGraceSeconds]);
+
+  const clearSpinLoop = useCallback(() => {
+    if (spinLoopRef.current) {
+      clearInterval(spinLoopRef.current);
+      spinLoopRef.current = null;
+    }
+  }, []);
+
   const clearRevealTimers = useCallback(() => {
     revealTimersRef.current.forEach((timer) => clearTimeout(timer));
     revealTimersRef.current = [];
-  }, []);
+    clearSpinLoop();
+  }, [clearSpinLoop]);
 
   const showResult = useCallback((settledRound, winner, result = {}, rowsOverride = null) => {
     const resultType = result?.result_type || (winner === 'pizza' || winner === 'salad' ? 'category' : 'item');
@@ -419,6 +449,8 @@ function GreedyLion({
     if (resultShownRef.current === key && (resultPopupRef.current || revealTimersRef.current.length > 0)) return;
     resultShownRef.current = key;
     clearRevealTimers();
+    clearSpinLoop();
+    setRoundPhase('result');
     setResultGateSynced(true);
     bettingLockedRef.current = true;
     setBettingLocked(true);
@@ -464,9 +496,9 @@ function GreedyLion({
     setRevealLandingCategory(null);
 
     const winningIndex = Math.max(0, items.findIndex((item) => resultType === 'category' ? item.category === category : item.id === winner));
-    const endMs = new Date(settledRound?.ends_at || Date.now()).getTime();
     const serverNowMs = Date.now() - Number(clockOffsetMs || 0);
-    const isLateReveal = Number.isFinite(endMs) && serverNowMs - endMs > 1200;
+    const revealStartMs = getSettledAtMs(settledRound);
+    const isLateReveal = Number.isFinite(revealStartMs) && serverNowMs - revealStartMs > 1200;
     const totalSteps = (isLateReveal ? 8 : REVEAL_BASE_STEPS) + winningIndex;
     for (let step = 0; step <= totalSteps; step += 1) {
       const timer = setTimeout(() => setRevealSpinIndex(step % items.length), step * REVEAL_STEP_MS);
@@ -493,23 +525,14 @@ function GreedyLion({
       }
     }, landDelay + POPUP_DELAY_MS + 900);
     revealTimersRef.current.push(landTimer, popupTimer, fallbackTimer);
-  }, [clearRevealTimers, clockOffsetMs, items, myBetRows, setResultGateSynced, user?.id]);
+  }, [clearRevealTimers, clearSpinLoop, clockOffsetMs, getSettledAtMs, items, myBetRows, setResultGateSynced, user?.id]);
 
   const closeResultPopup = useCallback(() => {
     clearRevealTimers();
     resultPopupRef.current = null;
     setResultPopup(null);
-    setWinnerCategory(null);
-    setRevealSpinIndex(-1);
-    setRevealLandingCategory(null);
-    setResultGateSynced(false);
-
-    const liveRound = roundRef.current;
-    const nextLocked = liveRound?.status !== 'betting' || getBettingMsLeft() <= BETTING_CLOSE_SAFETY_MS;
-    bettingLockedRef.current = nextLocked;
-    setBettingLocked(nextLocked);
     syncParentWallet();
-  }, [clearRevealTimers, getBettingMsLeft, setResultGateSynced, syncParentWallet]);
+  }, [clearRevealTimers, syncParentWallet]);
 
   const applyState = useCallback((payload) => {
     if (!payload?.success) {
@@ -573,18 +596,21 @@ function GreedyLion({
         return;
       }
       if (!previousRoundId || previousRoundId !== nextRound.id) {
-        if (!resultGateOpenRef.current) {
-          clearRevealTimers();
-          setWinnerCategory(null);
-          setRevealSpinIndex(-1);
-          setRevealLandingCategory(null);
-          resultPopupRef.current = null;
-          setResultPopup(null);
-          resultShownRef.current = null;
-        }
+        clearRevealTimers();
+        setResultGateSynced(false);
+        setWinnerCategory(null);
+        setRevealSpinIndex(-1);
+        setRevealLandingCategory(null);
+        resultPopupRef.current = null;
+        setResultPopup(null);
+        resultShownRef.current = null;
+        const roundOpen = getBettingMsLeft() > BETTING_CLOSE_SAFETY_MS;
+        bettingLockedRef.current = !roundOpen;
+        setBettingLocked(!roundOpen);
+        setRoundPhase(roundOpen ? 'betting' : 'spinning_grace');
       }
     }
-  }, [clearRevealTimers, displaySeconds, getBettingMsLeft, setBetRowsSynced, setWalletSynced, showResult, user?.id]);
+  }, [clearRevealTimers, displaySeconds, getBettingMsLeft, setBetRowsSynced, setResultGateSynced, setWalletSynced, showResult, user?.id]);
 
   const fetchState = useCallback(async () => {
     if (fetchInFlightRef.current) {
@@ -651,11 +677,14 @@ function GreedyLion({
       const serverNowMs = Date.now() - Number(clockOffsetMs || 0);
       const endMs = new Date(endsAt).getTime();
       if (status === 'settled') {
-        const left = Math.max(0, Math.ceil((endMs + displaySeconds * 1000 - serverNowMs) / 1000));
+        const resultEndMs = getSettledAtMs(roundRef.current) + displaySeconds * 1000;
+        const left = Math.max(0, Math.ceil((resultEndMs - serverNowMs) / 1000));
+        setRoundPhase(resultPopupRef.current ? 'result' : 'result_closed_locked');
         if (!bettingLockedRef.current) {
           bettingLockedRef.current = true;
           setBettingLocked(true);
         }
+        if (!resultGateOpenRef.current) setResultGateSynced(true);
         if (lastTickRef.current.popupLeft !== left) {
           lastTickRef.current.popupLeft = left;
           setPopupLeft(left);
@@ -669,6 +698,8 @@ function GreedyLion({
       } else {
         const msLeft = endMs - serverNowMs;
         const left = msLeft > BETTING_DISPLAY_GRACE_MS ? Math.max(1, Math.floor(msLeft / 1000)) : 0;
+        const nextPhase = msLeft > BETTING_CLOSE_SAFETY_MS ? 'betting' : 'spinning_grace';
+        setRoundPhase(nextPhase);
         const nextLocked = resultGateOpenRef.current || status !== 'betting' || msLeft <= BETTING_CLOSE_SAFETY_MS;
         if (bettingLockedRef.current !== nextLocked) {
           bettingLockedRef.current = nextLocked;
@@ -689,7 +720,24 @@ function GreedyLion({
     tick();
     const timer = setInterval(tick, TIMER_TICK_MS);
     return () => clearInterval(timer);
-  }, [clockOffsetMs, displaySeconds, endsAt, fetchState, status]);
+  }, [clockOffsetMs, displaySeconds, endsAt, fetchState, getSettledAtMs, setResultGateSynced, status]);
+
+  useEffect(() => {
+    if (roundPhase !== 'spinning_grace' || status !== 'betting' || items.length === 0) {
+      return undefined;
+    }
+    clearSpinLoop();
+    setResultGateSynced(true);
+    setWinnerCategory(null);
+    setRevealLandingCategory(null);
+    let spinIndex = 0;
+    setRevealSpinIndex(spinIndex % items.length);
+    spinLoopRef.current = setInterval(() => {
+      spinIndex = (spinIndex + 1) % items.length;
+      setRevealSpinIndex(spinIndex);
+    }, SPIN_GRACE_STEP_MS);
+    return () => clearSpinLoop();
+  }, [clearSpinLoop, items.length, roundPhase, setResultGateSynced, status]);
 
   useEffect(() => {
     if (!endsAt || status !== 'betting') return undefined;
@@ -814,13 +862,14 @@ function GreedyLion({
     }
   }, [debugGame, fetchState, getBettingMsLeft, roundId, selectedAmount, setBetRowsSynced, setWalletSynced, syncParentWallet, user?.id]);
 
+  const spinningGrace = roundPhase === 'spinning_grace';
   const title = status === 'settled'
     ? `${winnerCategory === 'pizza' ? 'Pizza' : winnerCategory === 'salad' ? 'Salad' : (itemById[winnerCategory]?.label || 'Item')} Wins`
     : timeLeft > 0
       ? 'Select Time'
-      : 'Royal Draw';
-  const timerLabel = status === 'settled' ? `${Math.max(0, popupLeft)}s` : `${Math.max(0, timeLeft)}s`;
-  const controlsDisabled = resultGateOpen || bettingLocked || status !== 'betting';
+      : 'Spinning';
+  const timerLabel = status === 'settled' ? `${Math.max(0, popupLeft)}s` : spinningGrace ? '...' : `${Math.max(0, timeLeft)}s`;
+  const controlsDisabled = resultGateOpen || bettingLocked || status !== 'betting' || roundPhase !== 'betting';
 
   const body = (
     <View style={[styles.shell, { width: boardW, maxHeight: boardH }]}>

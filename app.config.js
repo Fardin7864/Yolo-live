@@ -40,6 +40,7 @@ module.exports = () => ({
         backgroundColor: '#FFFFFF',
       },
       edgeToEdgeEnabled: true,
+      googleServicesFile: './android/app/google-services.json',
       permissions: [
         'CAMERA',
         'RECORD_AUDIO',
