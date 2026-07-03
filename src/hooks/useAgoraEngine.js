@@ -430,6 +430,18 @@ export function useAgoraEngine({ channelName, role, isVideo, enabled = true }) {
     } catch (_) {}
   }, []);
 
+  const setRemoteVideoPaused = useCallback((paused) => {
+    try {
+      const engine = engineRef.current;
+      if (!engine || !isVideo) return;
+      engine.muteAllRemoteVideoStreams(!!paused);
+      engine.updateChannelMediaOptions({
+        autoSubscribeAudio: true,
+        autoSubscribeVideo: !paused,
+      });
+    } catch (_) {}
+  }, [isVideo]);
+
   const switchCamera = useCallback(() => {
     try { engineRef.current?.switchCamera(); } catch (_) {}
   }, []);
@@ -452,6 +464,7 @@ export function useAgoraEngine({ channelName, role, isVideo, enabled = true }) {
     error,
     setMuted,
     setCameraEnabled,
+    setRemoteVideoPaused,
     switchCamera,
     setPublishing,
   };

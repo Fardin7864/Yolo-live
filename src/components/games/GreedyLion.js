@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -21,6 +21,15 @@ const GLOBAL_ROOM_ID = '00000000-0000-0000-0000-000000000001';
 const BETS = [100, 1000, 5000, 50000, 100000];
 const ROUND_SECONDS = 30;
 const POPUP_SECONDS = 15;
+const REALTIME_DEBOUNCE_MS = 350;
+const FALLBACK_POLL_MS = 20000;
+const TIMER_TICK_MS = 1000;
+const BETTING_CLOSE_SAFETY_MS = 0;
+const BETTING_DISPLAY_GRACE_MS = 120;
+const REVEAL_STEP_MS = 70;
+const REVEAL_BASE_STEPS = 26;
+const POPUP_DELAY_MS = 500;
+const ACCEPTED_LOCAL_BET_HOLD_MS = 45000;
 
 const A = {
   background: require('../../../assets/games/greedy-lion/background.webp'),
@@ -78,7 +87,147 @@ const parseItems = (multipliers) => {
   });
 };
 
-export default function GreedyLion({
+const FoodItem = memo(function FoodItem({
+  item,
+  itemSize,
+  selected,
+  userBetAmount,
+  revealSpinItemId,
+  revealLandingCategory,
+  winnerCategory,
+  status,
+  disabled,
+  onPressItem,
+}) {
+  const revealActive = !!revealSpinItemId || !!revealLandingCategory || status === 'settled';
+  const spinning = revealSpinItemId === item.id;
+  const landing = revealLandingCategory && (item.category === revealLandingCategory || item.id === revealLandingCategory);
+  const win = spinning || landing || (winnerCategory && (item.category === winnerCategory || item.id === winnerCategory));
+  const locked = revealActive && !win;
+  const handlePress = useCallback(() => onPressItem(item), [item, onPressItem]);
+
+  return (
+    <TouchableOpacity
+      activeOpacity={0.86}
+      disabled={disabled}
+      onPress={handlePress}
+      style={[
+        styles.itemCard,
+        {
+          width: itemSize,
+          height: itemSize * 1.18,
+          left: `${item.x}%`,
+          top: `${item.y}%`,
+          marginLeft: -itemSize / 2,
+          marginTop: -(itemSize * 0.58),
+        },
+        selected && styles.itemCardSelected,
+        spinning && styles.itemCardSpin,
+        landing && styles.itemCardLanding,
+        win && styles.itemCardWin,
+      ]}
+    >
+      {locked ? <View style={styles.itemLockedOverlay} pointerEvents="none" /> : null}
+      <Image source={item.image} style={styles.itemImage} resizeMode="contain" />
+      {userBetAmount ? <Text style={styles.itemBet}>{compact(userBetAmount)}</Text> : null}
+    </TouchableOpacity>
+  );
+});
+
+const CenterMascot = memo(function CenterMascot({ title, timerLabel }) {
+  return (
+    <View style={styles.centerMascot}>
+      <Image source={A.cat} style={styles.cat} resizeMode="contain" />
+      <Text style={styles.centerTitle}>{title}</Text>
+      <View style={styles.timerPill}>
+        <Text style={styles.timerText}>{timerLabel}</Text>
+      </View>
+    </View>
+  );
+});
+
+const HistoryRail = memo(function HistoryRail({ history }) {
+  return (
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.historyRail}>
+      {history.length === 0 ? (
+        <Text style={styles.emptyHistory}>First result coming soon</Text>
+      ) : history.map((row, index) => {
+        const type = row.result?.result_type || (['pizza', 'salad'].includes(row.winner_pos) ? 'category' : 'item');
+        const winner = row.result?.winner_pos || row.winner_pos || row.result?.category;
+        const cat = row.result?.category || winner;
+        return (
+          <View key={`${row.id || index}-${index}`} style={styles.historyItem}>
+            <Image source={type === 'category' ? (categoryAsset[cat] || A.chest) : (itemImageById[winner] || A.chest)} style={styles.historyImage} resizeMode="contain" />
+            {index === 0 ? <Text style={styles.newText}>NEW</Text> : null}
+            <Text style={styles.historyText}>{type === 'category' ? (cat === 'pizza' ? 'Pizza' : 'Salad') : (itemById[winner]?.label || 'Item')}</Text>
+          </View>
+        );
+      })}
+    </ScrollView>
+  );
+});
+
+const ResultPopupModal = memo(function ResultPopupModal({ resultPopup, onClose }) {
+  const hasWin = Number(resultPopup?.winAmount || 0) > 0;
+  return (
+    <Modal transparent animationType="fade" visible={!!resultPopup} onRequestClose={onClose}>
+      <View style={styles.popupOverlay}>
+        <LinearGradient colors={['#7B1D9E', '#40106F', '#170034']} style={styles.popup}>
+          <TouchableOpacity onPress={onClose} style={styles.popupCloseButton} hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}>
+            <Ionicons name="close" size={20} color="#FFFFFF" />
+          </TouchableOpacity>
+          <LinearGradient colors={hasWin ? ['#FFE584', '#FF9D2E'] : ['#8E6DFF', '#DD6BFF']} style={styles.popupResultHalo}>
+            <Image source={resultPopup?.resultType === 'category' ? (categoryAsset[resultPopup?.category] || A.chest) : (itemImageById[resultPopup?.winner] || A.chest)} style={styles.popupImage} resizeMode="contain" />
+          </LinearGradient>
+          <Text style={styles.popupTitle}>
+            {resultPopup?.resultType === 'category'
+              ? (resultPopup?.category === 'pizza' ? 'Pizza Wins!' : 'Salad Wins!')
+              : `${itemById[resultPopup?.winner]?.label || 'Item'} Wins!`}
+          </Text>
+          <LinearGradient colors={hasWin ? ['#FFF0A8', '#FFC34C'] : ['#281148', '#3C1A67']} style={[styles.totalWinBox, !hasWin && styles.totalLoseBox]}>
+            <Text style={[styles.totalWinLabel, !hasWin && styles.totalLoseLabel]}>Total Win</Text>
+            <Text style={[styles.totalWinAmount, !hasWin && styles.totalLoseAmount]}>
+              {compact(resultPopup?.winAmount || 0)} diamonds
+            </Text>
+          </LinearGradient>
+          <View style={styles.popupBetsBox}>
+            <Text style={styles.popupBetsTitle}>Your Bet On This Board</Text>
+            {(resultPopup?.itemWiseBets || []).length ? resultPopup.itemWiseBets.map((bet) => (
+              <View key={bet.id} style={styles.popupBetRow}>
+                <Image source={itemImageById[bet.id]} style={styles.popupBetIcon} resizeMode="contain" />
+                <Text style={styles.popupBetName}>{bet.label}</Text>
+                <Text style={[styles.popupBetAmount, bet.won ? styles.popupBetWon : styles.popupBetLost]}>
+                  {compact(bet.amount)} 💎 {bet.won ? 'WIN' : 'LOSE'}
+                </Text>
+              </View>
+            )) : (
+              <Text style={styles.noWinners}>No bet on this board</Text>
+            )}
+          </View>
+          <View style={styles.popupItems}>
+            {(resultPopup?.matchedIds || []).map((id) => (
+              <Image key={id} source={itemImageById[id]} style={styles.popupItem} resizeMode="contain" />
+            ))}
+          </View>
+          <View style={styles.winnersBox}>
+            <Text style={styles.winnersTitle}>Top Winners</Text>
+            {(resultPopup?.topWinners || []).length ? resultPopup.topWinners.slice(0, 3).map((winner, index) => (
+              <View key={`${winner.user_id}-${index}`} style={styles.winnerRow}>
+                <Text style={styles.winnerRank}>{index + 1}</Text>
+                <Text style={styles.winnerName} numberOfLines={1}>{winner.name || 'Guest'}</Text>
+                <Text style={styles.winnerAmount}>{compact(winner.win_amount)} 💎</Text>
+              </View>
+            )) : (
+              <Text style={styles.noWinners}>No winners this round</Text>
+            )}
+          </View>
+        </LinearGradient>
+      </View>
+    </Modal>
+  );
+});
+
+function GreedyLion({
   myDiamonds,
   setMyDiamonds,
   onBack,
@@ -86,9 +235,15 @@ export default function GreedyLion({
   standalone = false,
 }) {
   const { width, height } = useWindowDimensions();
-  const { user, diamonds: globalDiamonds, setDiamonds: setGlobalDiamonds } = useGlobalState();
-  const wallet = myDiamonds ?? globalDiamonds ?? 0;
-  const setWallet = setMyDiamonds || setGlobalDiamonds;
+  const {
+    user,
+    diamonds: globalDiamonds,
+    setDiamonds: setGlobalDiamonds,
+    lockBalanceUpdates,
+    unlockBalanceUpdates,
+  } = useGlobalState();
+  const walletSource = Number(myDiamonds ?? globalDiamonds ?? 0);
+  const setParentWallet = setMyDiamonds || setGlobalDiamonds;
 
   const [settings, setSettings] = useState(null);
   const [items, setItems] = useState(DEFAULT_ITEMS);
@@ -96,6 +251,8 @@ export default function GreedyLion({
   const [status, setStatus] = useState('loading');
   const [timeLeft, setTimeLeft] = useState(ROUND_SECONDS);
   const [popupLeft, setPopupLeft] = useState(0);
+  const [displayWallet, setDisplayWallet] = useState(walletSource);
+  const [bettingLocked, setBettingLocked] = useState(false);
   const [winnerCategory, setWinnerCategory] = useState(null);
   const [betRows, setBetRows] = useState([]);
   const [history, setHistory] = useState([]);
@@ -104,13 +261,30 @@ export default function GreedyLion({
   const [helpOpen, setHelpOpen] = useState(false);
   const [muted, setMuted] = useState(false);
   const [resultPopup, setResultPopup] = useState(null);
+  const [resultGateOpen, setResultGateOpen] = useState(false);
   const [clockOffsetMs, setClockOffsetMs] = useState(0);
   const [revealSpinIndex, setRevealSpinIndex] = useState(-1);
   const [revealLandingCategory, setRevealLandingCategory] = useState(null);
 
   const resultShownRef = useRef(null);
+  const resultPopupRef = useRef(null);
+  const resultGateOpenRef = useRef(false);
   const revealTimersRef = useRef([]);
   const fetchTimerRef = useRef(null);
+  const realtimeDebounceRef = useRef(null);
+  const fetchInFlightRef = useRef(false);
+  const fetchQueuedRef = useRef(false);
+  const fetchStateRef = useRef(null);
+  const roundRef = useRef(null);
+  const betRowsRef = useRef([]);
+  const walletRef = useRef(walletSource);
+  const localWalletDirtyRef = useRef(false);
+  const selectedAmountRef = useRef(selectedAmount);
+  const statusRef = useRef(status);
+  const timeLeftRef = useRef(timeLeft);
+  const pendingBetsRef = useRef(new Map());
+  const bettingLockedRef = useRef(false);
+  const lastTickRef = useRef({ timeLeft: null, popupLeft: null });
 
   const boardW = Math.min(width - 18, standalone ? 430 : width - 18);
   const boardH = Math.min(height - 2, standalone ? height - 2 : 720);
@@ -127,75 +301,127 @@ export default function GreedyLion({
   );
   const selectedItems = useMemo(() => new Set(myBetRows.map((row) => row.position)), [myBetRows]);
   const myRoundBet = useMemo(() => myBetRows.reduce((sum, row) => sum + Number(row.amount || 0), 0), [myBetRows]);
-  const itemBets = useMemo(() => {
+  const myItemBets = useMemo(() => {
     const map = {};
-    betRows.forEach((row) => { map[row.position] = (map[row.position] || 0) + Number(row.amount || 0); });
+    myBetRows.forEach((row) => { map[row.position] = (map[row.position] || 0) + Number(row.amount || 0); });
     return map;
+  }, [myBetRows]);
+
+  useEffect(() => {
+    roundRef.current = round;
+  }, [round]);
+
+  useEffect(() => {
+    betRowsRef.current = betRows;
   }, [betRows]);
+
+  useEffect(() => {
+    if (localWalletDirtyRef.current || pendingBetsRef.current.size > 0 || resultGateOpenRef.current) return;
+    const nextWallet = Number(walletSource || 0);
+    walletRef.current = nextWallet;
+    setDisplayWallet(nextWallet);
+  }, [walletSource]);
+
+  useEffect(() => {
+    lockBalanceUpdates?.();
+    return () => {
+      if (localWalletDirtyRef.current) {
+        setParentWallet?.(walletRef.current);
+      }
+      unlockBalanceUpdates?.();
+    };
+  }, [lockBalanceUpdates, setParentWallet, unlockBalanceUpdates]);
+
+  useEffect(() => {
+    selectedAmountRef.current = selectedAmount;
+  }, [selectedAmount]);
+
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
+
+  useEffect(() => {
+    timeLeftRef.current = timeLeft;
+  }, [timeLeft]);
+
+  useEffect(() => {
+    bettingLockedRef.current = bettingLocked;
+  }, [bettingLocked]);
+
+  useEffect(() => {
+    resultPopupRef.current = resultPopup;
+  }, [resultPopup]);
+
+  useEffect(() => {
+    resultGateOpenRef.current = resultGateOpen;
+  }, [resultGateOpen]);
+
+  const setBetRowsSynced = useCallback((updater) => {
+    const currentRows = betRowsRef.current;
+    const nextRows = typeof updater === 'function' ? updater(currentRows) : updater;
+    betRowsRef.current = nextRows;
+    setBetRows(nextRows);
+  }, []);
+
+  const setWalletSynced = useCallback((nextWallet, options = {}) => {
+    const safeWallet = Math.max(0, Number(nextWallet || 0));
+    walletRef.current = safeWallet;
+    setDisplayWallet(safeWallet);
+    if (options.markDirty !== false) localWalletDirtyRef.current = true;
+  }, []);
+
+  const syncParentWallet = useCallback((nextWallet = walletRef.current) => {
+    const safeWallet = Math.max(0, Number(nextWallet || 0));
+    localWalletDirtyRef.current = false;
+    setParentWallet?.(safeWallet);
+  }, [setParentWallet]);
+
+  const closeGame = useCallback(() => {
+    syncParentWallet();
+    unlockBalanceUpdates?.();
+    (onClose || onBack)?.();
+  }, [onBack, onClose, syncParentWallet, unlockBalanceUpdates]);
+
+  const backToGameMenu = useCallback(() => {
+    syncParentWallet();
+    onBack?.();
+  }, [onBack, syncParentWallet]);
+
+  const setResultGateSynced = useCallback((isOpen) => {
+    resultGateOpenRef.current = isOpen;
+    setResultGateOpen(isOpen);
+  }, []);
+
+  const debugGame = useCallback((event, details = {}) => {
+    if (typeof __DEV__ !== 'undefined' && __DEV__) {
+      console.log(`[GreedyLion] ${event}`, details);
+    }
+  }, []);
+
+  const getBettingMsLeft = useCallback(() => {
+    const liveRound = roundRef.current;
+    if (!liveRound?.ends_at) return 0;
+    const endMs = new Date(liveRound.ends_at).getTime();
+    if (!Number.isFinite(endMs)) return 0;
+    const serverNowMs = Date.now() - Number(clockOffsetMs || 0);
+    return endMs - serverNowMs;
+  }, [clockOffsetMs]);
 
   const clearRevealTimers = useCallback(() => {
     revealTimersRef.current.forEach((timer) => clearTimeout(timer));
     revealTimersRef.current = [];
   }, []);
 
-  const applyState = useCallback((payload) => {
-    if (!payload?.success) {
-      setStatus('offline');
-      setMessage(payload?.message || 'Greedy Lion is offline.');
-      return;
-    }
-    const nextSettings = payload.settings || null;
-    const nextRound = payload.round || null;
-    setSettings(nextSettings);
-    if (nextSettings?.multipliers) setItems(parseItems(nextSettings.multipliers));
-    if (payload.server_now) setClockOffsetMs(Date.now() - new Date(payload.server_now).getTime());
-    if (typeof payload.my_balance === 'number') setWallet?.(Number(payload.my_balance));
-    setRound(nextRound);
-    setStatus(nextRound?.status || 'loading');
-    const serverBets = Array.isArray(payload.bets) ? payload.bets : [];
-    setBetRows((currentRows) => {
-      const serverIds = new Set(serverBets.map((row) => row.id));
-      const keepLocalRows = currentRows.filter((row) => (
-        row?._localUntil
-        && row.round_id === nextRound?.id
-        && row._localUntil > Date.now()
-        && !serverIds.has(row.id)
-      ));
-      return [...serverBets, ...keepLocalRows];
-    });
-    setHistory(Array.isArray(payload.history) ? payload.history.slice(0, 15) : []);
-
-    const result = nextRound?.result || {};
-    const winner = result?.winner_pos || nextRound?.winner_pos || result?.category;
-    if (nextRound?.status === 'settled' && winner) {
-      showResult(nextRound, winner, result, Array.isArray(payload.bets) ? payload.bets : []);
-    } else if (nextRound?.status === 'betting') {
-      setWinnerCategory(null);
-      setRevealSpinIndex(-1);
-      setRevealLandingCategory(null);
-      setResultPopup(null);
-      resultShownRef.current = null;
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [setWallet]);
-
-  const fetchState = useCallback(async () => {
-    const { data, error } = await supabase.rpc('get_greedy_lion_state');
-    if (error) {
-      setStatus('offline');
-      setMessage(error.message || 'Could not load Greedy Lion.');
-      return;
-    }
-    applyState(data);
-  }, [applyState]);
-
   const showResult = useCallback((settledRound, winner, result = {}, rowsOverride = null) => {
     const resultType = result?.result_type || (winner === 'pizza' || winner === 'salad' ? 'category' : 'item');
     const category = result?.category || (resultType === 'category' ? winner : items.find((it) => it.id === winner)?.category);
     const key = `${settledRound.id}:${resultType}:${winner}`;
-    if (resultShownRef.current === key) return;
+    if (resultShownRef.current === key && (resultPopupRef.current || revealTimersRef.current.length > 0)) return;
     resultShownRef.current = key;
     clearRevealTimers();
+    setResultGateSynced(true);
+    bettingLockedRef.current = true;
+    setBettingLocked(true);
 
     const sourceRows = Array.isArray(rowsOverride) ? rowsOverride : myBetRows;
     const myRows = sourceRows.filter((row) => row.user_id === user?.id || row.user_id === 'demo');
@@ -232,53 +458,192 @@ export default function GreedyLion({
       topWinners: result?.top_winners || [],
     };
 
+    resultPopupRef.current = null;
     setResultPopup(null);
     setWinnerCategory(null);
     setRevealLandingCategory(null);
 
     const winningIndex = Math.max(0, items.findIndex((item) => resultType === 'category' ? item.category === category : item.id === winner));
-    const totalSteps = 26 + winningIndex;
+    const endMs = new Date(settledRound?.ends_at || Date.now()).getTime();
+    const serverNowMs = Date.now() - Number(clockOffsetMs || 0);
+    const isLateReveal = Number.isFinite(endMs) && serverNowMs - endMs > 1200;
+    const totalSteps = (isLateReveal ? 8 : REVEAL_BASE_STEPS) + winningIndex;
     for (let step = 0; step <= totalSteps; step += 1) {
-      const timer = setTimeout(() => setRevealSpinIndex(step % items.length), step * 70);
+      const timer = setTimeout(() => setRevealSpinIndex(step % items.length), step * REVEAL_STEP_MS);
       revealTimersRef.current.push(timer);
     }
 
-    const landDelay = (totalSteps + 1) * 70;
+    const landDelay = (totalSteps + 1) * REVEAL_STEP_MS;
     const landTimer = setTimeout(() => {
       setRevealSpinIndex(-1);
       setRevealLandingCategory(resultType === 'category' ? category : winner);
       setWinnerCategory(resultType === 'category' ? category : winner);
     }, landDelay);
     const popupTimer = setTimeout(() => {
+      resultPopupRef.current = popup;
       setResultPopup(popup);
-    }, landDelay + 500);
-    revealTimersRef.current.push(landTimer, popupTimer);
-  }, [clearRevealTimers, items, myBetRows, user?.id]);
+    }, landDelay + POPUP_DELAY_MS);
+    const fallbackTimer = setTimeout(() => {
+      if (!resultPopupRef.current && resultShownRef.current === key) {
+        setRevealSpinIndex(-1);
+        setRevealLandingCategory(resultType === 'category' ? category : winner);
+        setWinnerCategory(resultType === 'category' ? category : winner);
+        resultPopupRef.current = popup;
+        setResultPopup(popup);
+      }
+    }, landDelay + POPUP_DELAY_MS + 900);
+    revealTimersRef.current.push(landTimer, popupTimer, fallbackTimer);
+  }, [clearRevealTimers, clockOffsetMs, items, myBetRows, setResultGateSynced, user?.id]);
+
+  const closeResultPopup = useCallback(() => {
+    clearRevealTimers();
+    resultPopupRef.current = null;
+    setResultPopup(null);
+    setWinnerCategory(null);
+    setRevealSpinIndex(-1);
+    setRevealLandingCategory(null);
+    setResultGateSynced(false);
+
+    const liveRound = roundRef.current;
+    const nextLocked = liveRound?.status !== 'betting' || getBettingMsLeft() <= BETTING_CLOSE_SAFETY_MS;
+    bettingLockedRef.current = nextLocked;
+    setBettingLocked(nextLocked);
+    syncParentWallet();
+  }, [clearRevealTimers, getBettingMsLeft, setResultGateSynced, syncParentWallet]);
+
+  const applyState = useCallback((payload) => {
+    if (!payload?.success) {
+      setStatus('offline');
+      setMessage(payload?.message || 'Greedy Lion is offline.');
+      return;
+    }
+    const nextSettings = payload.settings || null;
+    const nextRound = payload.round || null;
+    const previousRoundId = roundRef.current?.id;
+    setSettings(nextSettings);
+    if (nextSettings?.multipliers) setItems(parseItems(nextSettings.multipliers));
+    if (payload.server_now) setClockOffsetMs(Date.now() - new Date(payload.server_now).getTime());
+    if (typeof payload.my_balance === 'number' && pendingBetsRef.current.size === 0) {
+      setWalletSynced(Number(payload.my_balance), { fromServer: true });
+    }
+    roundRef.current = nextRound;
+    statusRef.current = nextRound?.status || 'loading';
+    const nextLocked = resultGateOpenRef.current || nextRound?.status !== 'betting' || getBettingMsLeft() <= BETTING_CLOSE_SAFETY_MS;
+    bettingLockedRef.current = nextLocked;
+    setBettingLocked(nextLocked);
+    setRound(nextRound);
+    setStatus(nextRound?.status || 'loading');
+    const serverBets = Array.isArray(payload.my_bets)
+      ? payload.my_bets
+      : Array.isArray(payload.bets)
+        ? payload.bets.filter((row) => row.user_id === user?.id || row.user_id === 'demo')
+        : [];
+    let mergedBetRows = serverBets;
+    setBetRowsSynced((currentRows) => {
+      const serverIds = new Set(serverBets.map((row) => row.id));
+      const keepLocalRows = currentRows.filter((row) => (
+        (pendingBetsRef.current.has(row.id) || row?._serverAccepted || row?._localUntil)
+        && row.round_id === nextRound?.id
+        && (pendingBetsRef.current.has(row.id) || row?._serverAccepted || row._localUntil > Date.now())
+        && !serverIds.has(row.id)
+      ));
+      mergedBetRows = [...serverBets, ...keepLocalRows];
+      return mergedBetRows;
+    });
+    setHistory(Array.isArray(payload.history) ? payload.history.slice(0, 15) : []);
+
+    const nextHistory = Array.isArray(payload.history) ? payload.history.slice(0, 15) : [];
+    const result = nextRound?.result || {};
+    const winner = result?.winner_pos || nextRound?.winner_pos || result?.category;
+    if (nextRound?.status === 'settled' && winner) {
+      const mergedIds = new Set(mergedBetRows.map((row) => row.id));
+      const pendingRows = [...pendingBetsRef.current.values()].filter((row) => row.round_id === nextRound.id && !mergedIds.has(row.id));
+      showResult(nextRound, winner, result, [...mergedBetRows, ...pendingRows]);
+    } else if (nextRound?.status === 'betting') {
+      const latestSettled = nextHistory[0];
+      const latestResult = latestSettled?.result || {};
+      const latestWinner = latestResult?.winner_pos || latestSettled?.winner_pos || latestResult?.category;
+      const latestKeyType = latestResult?.result_type || (latestWinner === 'pizza' || latestWinner === 'salad' ? 'category' : 'item');
+      const latestKey = latestSettled?.id && latestWinner ? `${latestSettled.id}:${latestKeyType}:${latestWinner}` : null;
+      const serverNowMs = payload.server_now ? new Date(payload.server_now).getTime() : Date.now();
+      const settledAtMs = latestSettled?.settled_at ? new Date(latestSettled.settled_at).getTime() : 0;
+      const latestStillVisible = settledAtMs > 0 && serverNowMs <= settledAtMs + displaySeconds * 1000;
+      if (latestStillVisible && latestSettled?.id && latestWinner && resultShownRef.current !== latestKey) {
+        showResult(latestSettled, latestWinner, latestResult, []);
+        return;
+      }
+      if (!previousRoundId || previousRoundId !== nextRound.id) {
+        if (!resultGateOpenRef.current) {
+          clearRevealTimers();
+          setWinnerCategory(null);
+          setRevealSpinIndex(-1);
+          setRevealLandingCategory(null);
+          resultPopupRef.current = null;
+          setResultPopup(null);
+          resultShownRef.current = null;
+        }
+      }
+    }
+  }, [clearRevealTimers, displaySeconds, getBettingMsLeft, setBetRowsSynced, setWalletSynced, showResult, user?.id]);
+
+  const fetchState = useCallback(async () => {
+    if (fetchInFlightRef.current) {
+      fetchQueuedRef.current = true;
+      return;
+    }
+    fetchInFlightRef.current = true;
+    try {
+      const { data, error } = await supabase.rpc('get_greedy_lion_state');
+      if (error) {
+        setStatus('offline');
+        setMessage(error.message || 'Could not load Greedy Lion.');
+        return;
+      }
+      applyState(data);
+    } finally {
+      fetchInFlightRef.current = false;
+      if (fetchQueuedRef.current) {
+        fetchQueuedRef.current = false;
+        setTimeout(fetchState, 0);
+      }
+    }
+  }, [applyState]);
+
+  const scheduleFetchState = useCallback(() => {
+    if (realtimeDebounceRef.current) clearTimeout(realtimeDebounceRef.current);
+    realtimeDebounceRef.current = setTimeout(() => {
+      realtimeDebounceRef.current = null;
+      fetchState();
+    }, REALTIME_DEBOUNCE_MS);
+  }, [fetchState]);
 
   useEffect(() => {
-    fetchState();
-    fetchTimerRef.current = setInterval(fetchState, 5000);
+    fetchStateRef.current = fetchState;
+  }, [fetchState]);
+
+  useEffect(() => {
+    fetchStateRef.current?.();
+    fetchTimerRef.current = setInterval(() => fetchStateRef.current?.(), FALLBACK_POLL_MS);
     return () => {
       if (fetchTimerRef.current) clearInterval(fetchTimerRef.current);
+      if (realtimeDebounceRef.current) clearTimeout(realtimeDebounceRef.current);
       clearRevealTimers();
     };
-  }, [clearRevealTimers, fetchState]);
+  }, [clearRevealTimers]);
 
   useEffect(() => {
+    if (!roundId) return undefined;
     const roundChannel = supabase
       .channel(`greedy-lion-global-rounds-${Date.now()}`)
       .on('postgres_changes',
         { event: '*', schema: 'public', table: 'game_rounds', filter: `room_id=eq.${GLOBAL_ROOM_ID}` },
-        () => fetchState())
+        () => scheduleFetchState())
       .on('postgres_changes',
-        { event: '*', schema: 'public', table: 'game_round_bets' },
-        (payload) => {
-          const row = payload.new || payload.old;
-          if (row?.round_id === roundId) fetchState();
-        })
+        { event: '*', schema: 'public', table: 'game_round_bets', filter: `round_id=eq.${roundId}` },
+        () => scheduleFetchState())
       .subscribe();
     return () => { try { supabase.removeChannel(roundChannel); } catch (_) {} };
-  }, [fetchState, roundId]);
+  }, [roundId, scheduleFetchState]);
 
   useEffect(() => {
     if (!endsAt) return undefined;
@@ -287,32 +652,87 @@ export default function GreedyLion({
       const endMs = new Date(endsAt).getTime();
       if (status === 'settled') {
         const left = Math.max(0, Math.ceil((endMs + displaySeconds * 1000 - serverNowMs) / 1000));
-        setPopupLeft(left);
-        setTimeLeft(0);
+        if (!bettingLockedRef.current) {
+          bettingLockedRef.current = true;
+          setBettingLocked(true);
+        }
+        if (lastTickRef.current.popupLeft !== left) {
+          lastTickRef.current.popupLeft = left;
+          setPopupLeft(left);
+        }
+        if (lastTickRef.current.timeLeft !== 0) {
+          lastTickRef.current.timeLeft = 0;
+          timeLeftRef.current = 0;
+          setTimeLeft(0);
+        }
         if (left <= 0) fetchState();
       } else {
-        const left = Math.max(0, Math.ceil((endMs - serverNowMs) / 1000));
-        setTimeLeft(left);
-        setPopupLeft(0);
+        const msLeft = endMs - serverNowMs;
+        const left = msLeft > BETTING_DISPLAY_GRACE_MS ? Math.max(1, Math.floor(msLeft / 1000)) : 0;
+        const nextLocked = resultGateOpenRef.current || status !== 'betting' || msLeft <= BETTING_CLOSE_SAFETY_MS;
+        if (bettingLockedRef.current !== nextLocked) {
+          bettingLockedRef.current = nextLocked;
+          setBettingLocked(nextLocked);
+        }
+        if (lastTickRef.current.timeLeft !== left) {
+          lastTickRef.current.timeLeft = left;
+          timeLeftRef.current = left;
+          setTimeLeft(left);
+        }
+        if (lastTickRef.current.popupLeft !== 0) {
+          lastTickRef.current.popupLeft = 0;
+          setPopupLeft(0);
+        }
         if (left <= 0) fetchState();
       }
     };
     tick();
-    const timer = setInterval(tick, 250);
+    const timer = setInterval(tick, TIMER_TICK_MS);
     return () => clearInterval(timer);
   }, [clockOffsetMs, displaySeconds, endsAt, fetchState, status]);
 
-  const placeBet = async (item) => {
-    if (status !== 'betting' || timeLeft <= 0) {
+  useEffect(() => {
+    if (!endsAt || status !== 'betting') return undefined;
+    const msUntilLock = Math.max(0, getBettingMsLeft() - BETTING_CLOSE_SAFETY_MS);
+    if (msUntilLock <= 0) {
+      if (!bettingLockedRef.current) {
+        bettingLockedRef.current = true;
+        setBettingLocked(true);
+      }
+      return undefined;
+    }
+    const timer = setTimeout(() => {
+      bettingLockedRef.current = true;
+      setBettingLocked(true);
+    }, msUntilLock);
+    return () => clearTimeout(timer);
+  }, [endsAt, getBettingMsLeft, status]);
+
+  const placeBet = useCallback(async (item) => {
+    const liveRound = roundRef.current;
+    const liveRoundId = liveRound?.id || roundId;
+    const liveStatus = statusRef.current;
+    const liveTimeLeft = timeLeftRef.current;
+    const liveMsLeft = getBettingMsLeft();
+    const liveAmount = Number(selectedAmountRef.current || selectedAmount || 0);
+    const liveRows = betRowsRef.current.filter((row) => row.user_id === user?.id || row.user_id === 'demo');
+    const liveSelectedItems = new Set(liveRows.map((row) => row.position));
+    const liveWallet = Number(walletRef.current || 0);
+
+    if (resultGateOpenRef.current || liveStatus !== 'betting' || liveTimeLeft <= 0 || liveMsLeft <= BETTING_CLOSE_SAFETY_MS || bettingLockedRef.current) {
       setMessage('Betting is closed for this round.');
       return;
     }
-    const isNew = !selectedItems.has(item.id);
-    if (isNew && selectedItems.size >= 6) {
+    const isNew = !liveSelectedItems.has(item.id);
+    if (isNew && liveSelectedItems.size >= 6) {
       setMessage('Maximum 6 unique items per round. You can still add more to selected items.');
       return;
     }
-    if (Number(wallet || 0) < selectedAmount) {
+    if (!liveRoundId || liveAmount <= 0) {
+      setMessage('Round is not ready.');
+      return;
+    }
+    if (liveWallet < liveAmount) {
       setMessage('Insufficient diamonds.');
       return;
     }
@@ -320,40 +740,79 @@ export default function GreedyLion({
     const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}-${item.id}`;
     const tempRow = {
       id: tempId,
-      round_id: roundId,
+      round_id: liveRoundId,
       user_id: user?.id || 'demo',
       position: item.id,
-      amount: selectedAmount,
+      amount: liveAmount,
       win_amount: 0,
       _optimistic: true,
       _localUntil: Date.now() + 5000,
+      _createdAt: Date.now(),
     };
-    setMessage(`${item.label} +${compact(selectedAmount)}`);
-    setBetRows((cur) => [...cur, tempRow]);
-    setWallet?.((current) => Math.max(0, Number(current || 0) - selectedAmount));
-
-    const { data, error } = await supabase.rpc('place_greedy_lion_bet', {
-      p_round_id: roundId,
-      p_position: item.id,
-      p_amount: selectedAmount,
+    pendingBetsRef.current.set(tempId, tempRow);
+    debugGame('tap:optimistic', {
+      roundId: liveRoundId,
+      position: item.id,
+      amount: liveAmount,
+      walletBefore: liveWallet,
+      pending: pendingBetsRef.current.size,
     });
+    setMessage(`${item.label} +${compact(liveAmount)}`);
+    setBetRowsSynced((cur) => [...cur, tempRow]);
+    setWalletSynced(liveWallet - liveAmount);
 
-    if (!data?.success) {
-      setBetRows((cur) => cur.filter((row) => row.id !== tempId));
-      setWallet?.((current) => Number(current || 0) + selectedAmount);
-      setMessage(data?.message || error?.message || 'Bet failed.');
-      fetchState();
-      return;
+    try {
+      const { data, error } = await supabase.rpc('place_greedy_lion_bet', {
+        p_round_id: liveRoundId,
+        p_position: item.id,
+        p_amount: liveAmount,
+      });
+
+      if (!data?.success) {
+        pendingBetsRef.current.delete(tempId);
+        setBetRowsSynced((cur) => cur.filter((row) => row.id !== tempId));
+        setWalletSynced(Number(walletRef.current || 0) + liveAmount);
+        const failMessage = data?.message || error?.message || 'Bet failed.';
+        debugGame('tap:rejected', { tempId, position: item.id, amount: liveAmount, message: failMessage });
+        setMessage(/closed|expired/i.test(failMessage) ? 'Last bet missed the round.' : failMessage);
+        if (pendingBetsRef.current.size === 0) syncParentWallet();
+        if (statusRef.current === 'betting') fetchState();
+        return;
+      }
+
+      pendingBetsRef.current.delete(tempId);
+      if (typeof data.balance === 'number' && pendingBetsRef.current.size === 0) {
+        setWalletSynced(Math.min(Number(walletRef.current || 0), Number(data.balance)), { fromServer: true });
+        syncParentWallet(Math.min(Number(walletRef.current || 0), Number(data.balance)));
+        fetchState();
+      }
+      debugGame('tap:accepted', {
+        tempId,
+        betId: data.bet_id,
+        position: item.id,
+        amount: liveAmount,
+        pending: pendingBetsRef.current.size,
+      });
+      setBetRowsSynced((cur) => cur.map((row) => row.id === tempId ? {
+        ...row,
+        id: data.bet_id || tempId,
+        _optimistic: false,
+        _serverAccepted: true,
+        _localUntil: Date.now() + ACCEPTED_LOCAL_BET_HOLD_MS,
+      } : row));
+    } catch (err) {
+      pendingBetsRef.current.delete(tempId);
+      setBetRowsSynced((cur) => cur.filter((row) => row.id !== tempId));
+      setWalletSynced(Number(walletRef.current || 0) + liveAmount);
+      const failMessage = err?.message || 'Bet failed.';
+      debugGame('tap:error', { tempId, position: item.id, amount: liveAmount, message: failMessage });
+      setMessage(/closed|expired/i.test(failMessage) ? 'Last bet missed the round.' : failMessage);
+      if (pendingBetsRef.current.size === 0) syncParentWallet();
+      if (statusRef.current === 'betting') fetchState();
+    } finally {
+      pendingBetsRef.current.delete(tempId);
     }
-
-    if (typeof data.balance === 'number') setWallet?.(Number(data.balance));
-    setBetRows((cur) => cur.map((row) => row.id === tempId ? {
-      ...row,
-      id: data.bet_id,
-      _optimistic: false,
-      _localUntil: Date.now() + 5000,
-    } : row));
-  };
+  }, [debugGame, fetchState, getBettingMsLeft, roundId, selectedAmount, setBetRowsSynced, setWalletSynced, syncParentWallet, user?.id]);
 
   const title = status === 'settled'
     ? `${winnerCategory === 'pizza' ? 'Pizza' : winnerCategory === 'salad' ? 'Salad' : (itemById[winnerCategory]?.label || 'Item')} Wins`
@@ -361,15 +820,16 @@ export default function GreedyLion({
       ? 'Select Time'
       : 'Royal Draw';
   const timerLabel = status === 'settled' ? `${Math.max(0, popupLeft)}s` : `${Math.max(0, timeLeft)}s`;
+  const controlsDisabled = resultGateOpen || bettingLocked || status !== 'betting';
 
   const body = (
     <View style={[styles.shell, { width: boardW, maxHeight: boardH }]}>
       <LinearGradient colors={['#1E0C49', '#160532']} style={styles.topbar}>
-        <TouchableOpacity onPress={onBack} style={styles.iconButton}>
+        <TouchableOpacity onPress={backToGameMenu} style={styles.iconButton}>
           <Ionicons name="chevron-back" size={22} color="#FFFFFF" />
         </TouchableOpacity>
         <Text style={styles.gameTitle}>Greedy Lion</Text>
-        <TouchableOpacity onPress={onClose || onBack} style={styles.iconButton}>
+        <TouchableOpacity onPress={closeGame} style={styles.iconButton}>
           <Ionicons name="close" size={22} color="#FFFFFF" />
         </TouchableOpacity>
       </LinearGradient>
@@ -394,47 +854,22 @@ export default function GreedyLion({
 
           <View style={[styles.wheelWrap, { height: Math.min(404, boardW * 0.98) }]}>
             <Image source={A.wheel} style={[styles.wheel, { width: Math.min(boardW * 1.02, 424), height: Math.min(boardW * 1.02, 424) }]} resizeMode="contain" />
-            <View style={styles.centerMascot}>
-              <Image source={A.cat} style={styles.cat} resizeMode="contain" />
-              <Text style={styles.centerTitle}>{title}</Text>
-              <View style={styles.timerPill}>
-                <Text style={styles.timerText}>{timerLabel}</Text>
-              </View>
-            </View>
-            {items.map((item) => {
-              const selected = selectedItems.has(item.id);
-              const revealActive = revealSpinIndex >= 0 || !!revealLandingCategory || status === 'settled';
-              const spinning = revealSpinIndex >= 0 && items[revealSpinIndex]?.id === item.id;
-              const landing = revealLandingCategory && (item.category === revealLandingCategory || item.id === revealLandingCategory);
-              const win = spinning || landing || (winnerCategory && (item.category === winnerCategory || item.id === winnerCategory));
-              const locked = revealActive && !win;
-              return (
-                <TouchableOpacity
-                  key={item.id}
-                  activeOpacity={0.86}
-                  onPress={() => placeBet(item)}
-                  style={[
-                    styles.itemCard,
-                    {
-                      width: itemSize,
-                      height: itemSize * 1.18,
-                      left: `${item.x}%`,
-                      top: `${item.y}%`,
-                      marginLeft: -itemSize / 2,
-                      marginTop: -(itemSize * 0.58),
-                    },
-                    selected && styles.itemCardSelected,
-                    spinning && styles.itemCardSpin,
-                    landing && styles.itemCardLanding,
-                    win && styles.itemCardWin,
-                  ]}
-                >
-                  {locked ? <View style={styles.itemLockedOverlay} pointerEvents="none" /> : null}
-                  <Image source={item.image} style={styles.itemImage} resizeMode="contain" />
-                  {itemBets[item.id] ? <Text style={styles.itemBet}>{compact(itemBets[item.id])}</Text> : null}
-                </TouchableOpacity>
-              );
-            })}
+            <CenterMascot title={title} timerLabel={timerLabel} />
+            {items.map((item) => (
+              <FoodItem
+                key={item.id}
+                item={item}
+                itemSize={itemSize}
+                selected={selectedItems.has(item.id)}
+                userBetAmount={myItemBets[item.id] || 0}
+                revealSpinItemId={revealSpinIndex >= 0 ? items[revealSpinIndex]?.id : null}
+                revealLandingCategory={revealLandingCategory}
+                winnerCategory={winnerCategory}
+                status={status}
+                disabled={controlsDisabled}
+                onPressItem={placeBet}
+              />
+            ))}
           </View>
 
           <View style={styles.categoryRow}>
@@ -455,8 +890,8 @@ export default function GreedyLion({
           </View>
           <View style={styles.amountRow}>
             {BETS.map((amount) => (
-              <TouchableOpacity key={amount} onPress={() => setSelectedAmount(amount)} style={styles.amountTouch}>
-                <View style={[styles.amountChip, selectedAmount === amount && styles.amountChipActive]}>
+              <TouchableOpacity key={amount} disabled={controlsDisabled} onPress={() => setSelectedAmount(amount)} style={styles.amountTouch}>
+                <View style={[styles.amountChip, controlsDisabled && styles.amountChipDisabled, selectedAmount === amount && styles.amountChipActive]}>
                   <Text style={[styles.amountText, selectedAmount === amount && styles.amountTextActive]}>{compact(amount)}</Text>
                 </View>
               </TouchableOpacity>
@@ -467,22 +902,7 @@ export default function GreedyLion({
 
         <LinearGradient colors={['rgba(78,13,123,.98)', 'rgba(38,8,80,.98)']} style={styles.resultPanel}>
           <Text style={styles.resultTitle}>Result</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.historyRail}>
-            {history.length === 0 ? (
-              <Text style={styles.emptyHistory}>First result coming soon</Text>
-            ) : history.map((row, index) => {
-              const type = row.result?.result_type || (['pizza', 'salad'].includes(row.winner_pos) ? 'category' : 'item');
-              const winner = row.result?.winner_pos || row.winner_pos || row.result?.category;
-              const cat = row.result?.category || winner;
-              return (
-                <View key={`${row.id || index}-${index}`} style={styles.historyItem}>
-                  <Image source={type === 'category' ? (categoryAsset[cat] || A.chest) : (itemImageById[winner] || A.chest)} style={styles.historyImage} resizeMode="contain" />
-                  {index === 0 ? <Text style={styles.newText}>NEW</Text> : null}
-                  <Text style={styles.historyText}>{type === 'category' ? (cat === 'pizza' ? 'Pizza' : 'Salad') : (itemById[winner]?.label || 'Item')}</Text>
-                </View>
-              );
-            })}
-          </ScrollView>
+          <HistoryRail history={history} />
         </LinearGradient>
 
         <View style={styles.footerRow}>
@@ -490,7 +910,7 @@ export default function GreedyLion({
             <Image source={A.cat} style={styles.avatar} resizeMode="contain" />
             <View style={{ flex: 1 }}>
               <Text style={styles.footerName} numberOfLines={1}>Current Balance</Text>
-              <Text style={styles.diamondText}>{compact(wallet)} diamonds</Text>
+              <Text style={styles.diamondText}>{compact(displayWallet)} diamonds</Text>
             </View>
           </LinearGradient>
           <LinearGradient colors={['#FFE2BE', '#F1CDA9']} style={styles.balanceCard}>
@@ -510,54 +930,7 @@ export default function GreedyLion({
         </View>
       )}
 
-      <Modal transparent animationType="fade" visible={!!resultPopup}>
-        <View style={styles.popupOverlay}>
-          <LinearGradient colors={['#4D1477', '#210743']} style={styles.popup}>
-            <Image source={resultPopup?.resultType === 'category' ? (categoryAsset[resultPopup?.category] || A.chest) : (itemImageById[resultPopup?.winner] || A.chest)} style={styles.popupImage} resizeMode="contain" />
-            <Text style={styles.popupTitle}>
-              {resultPopup?.resultType === 'category'
-                ? (resultPopup?.category === 'pizza' ? 'Pizza Wins!' : 'Salad Wins!')
-                : `${itemById[resultPopup?.winner]?.label || 'Item'} Wins!`}
-            </Text>
-            <Text style={styles.popupAmount}>
-              {Number(resultPopup?.winAmount || 0) > 0
-                ? `You win ${compact(resultPopup.winAmount)} diamonds`
-                : 'You lose this board'}
-            </Text>
-            <View style={styles.popupBetsBox}>
-              <Text style={styles.popupBetsTitle}>Your Bet On This Board</Text>
-              {(resultPopup?.itemWiseBets || []).length ? resultPopup.itemWiseBets.map((bet) => (
-                <View key={bet.id} style={styles.popupBetRow}>
-                  <Image source={itemImageById[bet.id]} style={styles.popupBetIcon} resizeMode="contain" />
-                  <Text style={styles.popupBetName}>{bet.label}</Text>
-                  <Text style={[styles.popupBetAmount, bet.won ? styles.popupBetWon : styles.popupBetLost]}>
-                    {compact(bet.amount)} 💎 {bet.won ? 'WIN' : 'LOSE'}
-                  </Text>
-                </View>
-              )) : (
-                <Text style={styles.noWinners}>No bet on this board</Text>
-              )}
-            </View>
-            <View style={styles.popupItems}>
-              {(resultPopup?.matchedIds || []).map((id) => (
-                <Image key={id} source={itemImageById[id]} style={styles.popupItem} resizeMode="contain" />
-              ))}
-            </View>
-            <View style={styles.winnersBox}>
-              <Text style={styles.winnersTitle}>Top Winners</Text>
-              {(resultPopup?.topWinners || []).length ? resultPopup.topWinners.slice(0, 3).map((winner, index) => (
-                <View key={`${winner.user_id}-${index}`} style={styles.winnerRow}>
-                  <Text style={styles.winnerRank}>{index + 1}</Text>
-                  <Text style={styles.winnerName} numberOfLines={1}>{winner.name || 'Guest'}</Text>
-                  <Text style={styles.winnerAmount}>{compact(winner.win_amount)} 💎</Text>
-                </View>
-              )) : (
-                <Text style={styles.noWinners}>No winners this round</Text>
-              )}
-            </View>
-          </LinearGradient>
-        </View>
-      </Modal>
+      <ResultPopupModal resultPopup={resultPopup} onClose={closeResultPopup} />
 
       <Modal transparent animationType="fade" visible={helpOpen} onRequestClose={() => setHelpOpen(false)}>
         <View style={styles.popupOverlay}>
@@ -576,6 +949,8 @@ export default function GreedyLion({
 
   return standalone ? body : <View style={styles.host}>{body}</View>;
 }
+
+export default memo(GreedyLion);
 
 const styles = StyleSheet.create({
   host: { alignItems: 'center', justifyContent: 'flex-start' },
@@ -682,6 +1057,7 @@ const styles = StyleSheet.create({
   amountRow: { flexDirection: 'row', gap: 5 },
   amountTouch: { flex: 1 },
   amountChip: { height: 29, borderRadius: 9, borderWidth: 2, borderColor: '#D8A33D', backgroundColor: 'rgba(255,255,255,.08)', alignItems: 'center', justifyContent: 'center' },
+  amountChipDisabled: { opacity: 0.48 },
   amountChipActive: { backgroundColor: '#FFC55D', borderColor: '#FFF4A2' },
   amountText: { color: '#FFFFFF', fontSize: 12, fontWeight: '900' },
   amountTextActive: { color: '#40104E' },
@@ -703,12 +1079,44 @@ const styles = StyleSheet.create({
   chest: { width: 58, height: 50 },
   loading: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(8,0,28,.78)', alignItems: 'center', justifyContent: 'center' },
   loadingText: { color: '#FFF2BF', fontSize: 14, fontWeight: '900', marginTop: 10 },
-  popupOverlay: { flex: 1, backgroundColor: 'rgba(5,0,20,.68)', alignItems: 'center', justifyContent: 'center', padding: 22 },
-  popup: { width: '100%', maxWidth: 340, borderRadius: 28, borderWidth: 3, borderColor: '#F0C35A', alignItems: 'center', padding: 18 },
-  popupImage: { width: 170, height: 105 },
-  popupTitle: { color: '#FFF2BF', fontSize: 24, fontWeight: '900', marginTop: 2 },
-  popupAmount: { color: '#FFFFFF', fontSize: 15, fontWeight: '800', textAlign: 'center', marginTop: 7 },
-  popupBetsBox: { width: '100%', marginTop: 10, backgroundColor: 'rgba(16,2,38,.34)', borderRadius: 14, borderWidth: 1, borderColor: 'rgba(240,195,90,.28)', padding: 9 },
+  popupOverlay: { flex: 1, backgroundColor: 'rgba(5,0,20,.72)', alignItems: 'center', justifyContent: 'center', padding: 22 },
+  popup: { width: '100%', maxWidth: 348, borderRadius: 26, borderWidth: 3, borderColor: '#FFD86A', alignItems: 'center', paddingHorizontal: 16, paddingTop: 18, paddingBottom: 16 },
+  popupCloseButton: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    zIndex: 5,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 2,
+    borderColor: 'rgba(255,232,143,.9)',
+    backgroundColor: 'rgba(31,8,62,.86)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  popupResultHalo: {
+    width: 188,
+    height: 126,
+    borderRadius: 28,
+    borderWidth: 2,
+    borderColor: '#FFF3A6',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#FFD76A',
+    shadowOpacity: .85,
+    shadowRadius: 16,
+    elevation: 12,
+  },
+  popupImage: { width: 172, height: 106 },
+  popupTitle: { color: '#FFF8C7', fontSize: 25, fontWeight: '900', marginTop: 9, textAlign: 'center', textShadowColor: '#42002F', textShadowRadius: 7 },
+  totalWinBox: { width: '100%', minHeight: 64, borderRadius: 18, borderWidth: 2, borderColor: '#FFF4A2', alignItems: 'center', justifyContent: 'center', marginTop: 10 },
+  totalLoseBox: { borderColor: 'rgba(255,255,255,.24)' },
+  totalWinLabel: { color: '#6A2800', fontSize: 12, fontWeight: '900', textTransform: 'uppercase' },
+  totalLoseLabel: { color: '#D8C4EF' },
+  totalWinAmount: { color: '#431050', fontSize: 24, fontWeight: '900', marginTop: 1 },
+  totalLoseAmount: { color: '#FFFFFF' },
+  popupBetsBox: { width: '100%', marginTop: 10, backgroundColor: 'rgba(16,2,38,.46)', borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255,216,106,.42)', padding: 9 },
   popupBetsTitle: { color: '#FFE7A2', fontSize: 12, fontWeight: '900', textAlign: 'center', marginBottom: 5 },
   popupBetRow: { flexDirection: 'row', alignItems: 'center', minHeight: 28, gap: 6 },
   popupBetIcon: { width: 24, height: 24 },
@@ -718,7 +1126,7 @@ const styles = StyleSheet.create({
   popupBetLost: { color: '#FF7373' },
   popupItems: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8, marginTop: 8, minHeight: 34 },
   popupItem: { width: 40, height: 40 },
-  winnersBox: { width: '100%', backgroundColor: 'rgba(16,2,38,.42)', borderRadius: 14, borderWidth: 1, borderColor: 'rgba(240,195,90,.38)', padding: 10, marginTop: 10 },
+  winnersBox: { width: '100%', backgroundColor: 'rgba(19,5,49,.55)', borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255,216,106,.42)', padding: 10, marginTop: 10 },
   winnersTitle: { color: '#FFE7A2', fontSize: 12, fontWeight: '900', textAlign: 'center', marginBottom: 6 },
   winnerRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
   winnerRank: { width: 20, height: 20, borderRadius: 10, backgroundColor: '#FFC55D', color: '#431050', textAlign: 'center', lineHeight: 20, fontWeight: '900' },

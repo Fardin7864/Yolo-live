@@ -14,7 +14,7 @@ DECLARE
   v_settings public.game_settings%ROWTYPE;
   v_round public.game_rounds%ROWTYPE;
   v_display INT;
-  v_bets JSONB := '[]'::jsonb;
+  v_my_bets JSONB := '[]'::jsonb;
   v_history JSONB := '[]'::jsonb;
   v_my_balance BIGINT;
   v_my_bet BIGINT := 0;
@@ -33,22 +33,21 @@ BEGIN
        (status = 'settled' AND ends_at + (v_display || ' seconds')::interval > NOW())
      )
    ORDER BY
-     CASE WHEN status = 'betting' THEN 0 ELSE 1 END,
+     CASE WHEN status = 'settled' THEN 0 ELSE 1 END,
      started_at DESC
    LIMIT 1;
 
-  IF FOUND THEN
+  IF FOUND AND me IS NOT NULL THEN
     SELECT COALESCE(jsonb_agg(to_jsonb(b) ORDER BY b.created_at ASC), '[]'::jsonb)
-      INTO v_bets
+      INTO v_my_bets
       FROM public.game_round_bets b
-     WHERE b.round_id = v_round.id;
+     WHERE b.round_id = v_round.id
+       AND b.user_id = me;
 
-    IF me IS NOT NULL THEN
-      SELECT COALESCE(SUM(amount), 0)
-        INTO v_my_bet
-        FROM public.game_round_bets
-       WHERE round_id = v_round.id AND user_id = me;
-    END IF;
+    SELECT COALESCE(SUM(amount), 0)
+      INTO v_my_bet
+      FROM public.game_round_bets
+     WHERE round_id = v_round.id AND user_id = me;
   END IF;
 
   SELECT COALESCE(jsonb_agg(to_jsonb(h) ORDER BY h.settled_at DESC), '[]'::jsonb)
@@ -77,7 +76,8 @@ BEGIN
     'server_now', NOW(),
     'settings', to_jsonb(v_settings),
     'round', CASE WHEN v_round.id IS NULL THEN NULL ELSE to_jsonb(v_round) END,
-    'bets', v_bets,
+    'bets', v_my_bets,
+    'my_bets', v_my_bets,
     'history', v_history,
     'my_balance', v_my_balance,
     'my_round_bet', v_my_bet

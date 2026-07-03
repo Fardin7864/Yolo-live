@@ -7,7 +7,7 @@ import { KeyboardEvents } from 'react-native-keyboard-controller';
 import { showCuteAlert, confirmCuteAlert } from '../../src/components/CuteAlert';
 import { Ionicons } from '@expo/vector-icons';
 import { useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
-import { RtcSurfaceView } from 'react-native-agora';
+import { RtcSurfaceView, RtcTextureView } from 'react-native-agora';
 import * as Linking from 'expo-linking';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Audio from 'expo-audio';
@@ -34,6 +34,7 @@ import { useOneShotIntroPlayer } from '../../src/hooks/useOneShotIntroPlayer';
 import { flagFor } from '../../src/utils/countryFlag';
 
 const { width, height } = Dimensions.get('screen');
+const AgoraVideoView = Platform.OS === 'android' ? RtcTextureView : RtcSurfaceView;
 const MALL_INTRO_MAX_HEIGHT = height * 0.92;
 const MALL_INTRO_WIDTH = width;
 const MALL_INTRO_PLAYED_STORAGE_PREFIX = 'mall_intro_played_v1';
@@ -75,6 +76,169 @@ const AUDIO_SEAT_AVATAR_SIZE = 58 * AUDIO_SEAT_SCALE;
 const AUDIO_SEAT_EMPTY_SIZE = 62 * AUDIO_SEAT_SCALE;
 const AUDIO_SEAT_PROFILE_FRAME_SIZE = 96 * AUDIO_SEAT_SCALE;
 const AUDIO_SEAT_PULSE_SIZE = 70 * AUDIO_SEAT_SCALE;
+
+const GamesBottomSheet = React.memo(function GamesBottomSheet({
+  gameMenuState,
+  setGameMenuState,
+  insetsTop,
+  insetsBottom,
+  roomId,
+  myDiamonds,
+  setMyDiamonds,
+  fruitActive,
+  teenPattiActive,
+  greedyLionActive,
+}) {
+  const closeGames = useCallback(() => setGameMenuState(null), [setGameMenuState]);
+  const backToMenu = useCallback(() => setGameMenuState('menu'), [setGameMenuState]);
+  const openFruit = useCallback(() => setGameMenuState('fruit'), [setGameMenuState]);
+  const openTeenPatti = useCallback(() => setGameMenuState('teenpatti'), [setGameMenuState]);
+  const openGreedyLion = useCallback(() => setGameMenuState('greedylion'), [setGameMenuState]);
+
+  const menuHeight = Math.min(620, Math.round(height * 0.72));
+  const greedyLionHeight = Math.min(760, height - insetsTop - 12);
+  const gameSheetHeight = gameMenuState === 'menu'
+    ? menuHeight
+    : gameMenuState === 'greedylion'
+      ? greedyLionHeight
+      : 'auto';
+
+  return (
+    <Modal animationType="slide" transparent={true} visible={gameMenuState !== null} onRequestClose={closeGames}>
+      <View style={styles.giftModalOverlay}>
+        <View style={[styles.giftModalContent, { paddingBottom: insetsBottom + 20, height: gameSheetHeight }]}>
+
+          {gameMenuState === 'menu' && (
+            <View style={{ flex: 1 }}>
+              <View style={styles.gamePickerHeader}>
+                <View>
+                  <Text style={styles.gamePickerTitle}>Mini Games</Text>
+                  <Text style={styles.gamePickerSubtitle}>Bet together — one shared round per game</Text>
+                </View>
+                <TouchableOpacity onPress={closeGames} style={styles.gamePickerClose}>
+                  <Ionicons name="close" size={18} color="rgba(255,255,255,0.7)" />
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={styles.gameTileGrid}
+              >
+                {fruitActive && (
+                  <TouchableOpacity
+                    style={styles.gameTile}
+                    activeOpacity={0.85}
+                    onPress={openFruit}
+                  >
+                    <LinearGradient
+                      colors={['rgba(251,191,36,0.18)', 'rgba(244,114,182,0.10)']}
+                      style={styles.gameTileGrad}
+                    >
+                      <View style={styles.gameTileIconWrap}>
+                        <Text style={styles.gameTileEmoji}>🎰</Text>
+                      </View>
+                      <Text style={styles.gameTileName} numberOfLines={1}>Fruit Roulette</Text>
+                      <Text style={styles.gameTileDesc} numberOfLines={2}>Pick a fruit. Win up to 8×.</Text>
+                      <View style={styles.gameTileChip}>
+                        <Ionicons name="people-outline" size={10} color="#FBBF24" />
+                        <Text style={styles.gameTileChipText}>Multiplayer</Text>
+                      </View>
+                    </LinearGradient>
+                  </TouchableOpacity>
+                )}
+
+                {teenPattiActive && (
+                  <TouchableOpacity
+                    style={styles.gameTile}
+                    activeOpacity={0.85}
+                    onPress={openTeenPatti}
+                  >
+                    <LinearGradient
+                      colors={['rgba(6,182,212,0.18)', 'rgba(217,70,239,0.10)']}
+                      style={styles.gameTileGrad}
+                    >
+                      <View style={styles.gameTileIconWrap}>
+                        <Text style={styles.gameTileEmoji}>🃏</Text>
+                      </View>
+                      <Text style={styles.gameTileName} numberOfLines={1}>Teen Patti</Text>
+                      <Text style={styles.gameTileDesc} numberOfLines={2}>Bet on A, B or C. Winner pays 2×.</Text>
+                      <View style={styles.gameTileChip}>
+                        <Ionicons name="people-outline" size={10} color="#06B6D4" />
+                        <Text style={[styles.gameTileChipText, { color: '#06B6D4' }]}>Multiplayer</Text>
+                      </View>
+                    </LinearGradient>
+                  </TouchableOpacity>
+                )}
+
+                {greedyLionActive && (
+                  <TouchableOpacity
+                    style={styles.gameTile}
+                    activeOpacity={0.85}
+                    onPress={openGreedyLion}
+                  >
+                    <LinearGradient
+                      colors={['rgba(245,199,106,0.20)', 'rgba(126,52,174,0.18)']}
+                      style={styles.gameTileGrad}
+                    >
+                      <View style={styles.gameTileIconWrap}>
+                        <Text style={styles.gameTileEmoji}>🦁</Text>
+                      </View>
+                      <Text style={styles.gameTileName} numberOfLines={1}>Greedy Lion</Text>
+                      <Text style={styles.gameTileDesc} numberOfLines={2}>Pick up to 6 foods. Pizza or Salad wins.</Text>
+                      <View style={styles.gameTileChip}>
+                        <Ionicons name="people-outline" size={10} color="#F5C76A" />
+                        <Text style={[styles.gameTileChipText, { color: '#F5C76A' }]}>Native</Text>
+                      </View>
+                    </LinearGradient>
+                  </TouchableOpacity>
+                )}
+
+                {!fruitActive && !teenPattiActive && !greedyLionActive && (
+                  <View style={styles.gameTileEmpty}>
+                    <Ionicons name="game-controller-outline" size={44} color="rgba(255,255,255,0.2)" />
+                    <Text style={styles.gameTileEmptyText}>
+                      Games are temporarily disabled.
+                    </Text>
+                  </View>
+                )}
+              </ScrollView>
+            </View>
+          )}
+
+          {gameMenuState === 'fruit' && (
+            <FruitRoulette
+              roomId={roomId}
+              myDiamonds={myDiamonds}
+              setMyDiamonds={setMyDiamonds}
+              onBack={backToMenu}
+              onClose={closeGames}
+            />
+          )}
+
+          {gameMenuState === 'teenpatti' && (
+            <TeenPatti
+              roomId={roomId}
+              myDiamonds={myDiamonds}
+              setMyDiamonds={setMyDiamonds}
+              onBack={backToMenu}
+              onClose={closeGames}
+            />
+          )}
+
+          {gameMenuState === 'greedylion' && (
+            <GreedyLion
+              myDiamonds={myDiamonds}
+              setMyDiamonds={setMyDiamonds}
+              onBack={backToMenu}
+              onClose={closeGames}
+            />
+          )}
+
+        </View>
+      </View>
+    </Modal>
+  );
+});
 
 const mallIntroMediaSource = (url) => {
   if (typeof url === 'number') return url;
@@ -1269,6 +1433,27 @@ export default function BroadcastRoomScreen() {
     isVideo: !isAudio,
     enabled: agoraEnabled,
   });
+
+  const gameSheetOpen = gameMenuState !== null;
+  const audioGameCovered = isAudio && gameSheetOpen;
+  const setRemoteVideoPaused = agora.setRemoteVideoPaused;
+  useEffect(() => {
+    if (gameSheetOpen && showGiftMenu) setShowGiftMenu(false);
+    if (gameSheetOpen && showMoreMenu) setShowMoreMenu(false);
+    if (gameSheetOpen && showHostMoreMenu) setShowHostMoreMenu(false);
+    if (gameSheetOpen && showSFXMenu) setShowSFXMenu(false);
+    if (gameSheetOpen && showAudioTemplates) setShowAudioTemplates(false);
+  }, [gameSheetOpen, showAudioTemplates, showGiftMenu, showHostMoreMenu, showMoreMenu, showSFXMenu]);
+
+  useEffect(() => {
+    if (isAudio || !agora.joined) return undefined;
+    // The game sheet covers the live video. Pause hidden remote video decode
+    // while keeping audio subscribed so the room still feels live.
+    setRemoteVideoPaused?.(gameSheetOpen);
+    return () => {
+      setRemoteVideoPaused?.(false);
+    };
+  }, [isAudio, agora.joined, gameSheetOpen, setRemoteVideoPaused]);
   // The broadcaster's deterministic Agora uid — used by viewers to render the
   // host's remote feed in the fullscreen background.
   const hostUid = agoraUidFromId(String(id || ''));
@@ -1304,7 +1489,7 @@ export default function BroadcastRoomScreen() {
       if (!isHostView && !(agora.joined && agora.remoteUids.includes(hostUid))) {
         setIsLiveEndedForViewer(true);
         if (streamRecordId) {
-          supabase.rpc('report_dead_stream', { p_stream_id: streamRecordId })
+          Promise.resolve(supabase.rpc('report_dead_stream', { p_stream_id: streamRecordId }))
             .catch(() => { /* best effort */ });
         }
       }
@@ -1581,7 +1766,7 @@ export default function BroadcastRoomScreen() {
                 // end a live with a recent heartbeat, so a buggy
                 // client can't kill a healthy room.
                 if (streamRecordId) {
-                  supabase.rpc('report_dead_stream', { p_stream_id: streamRecordId })
+                  Promise.resolve(supabase.rpc('report_dead_stream', { p_stream_id: streamRecordId }))
                     .catch(() => { /* best effort */ });
                 }
               }, 8000);
@@ -3710,149 +3895,19 @@ export default function BroadcastRoomScreen() {
 
 
   const renderGamesBottomSheet = () => {
-    // Compact 2-column tile grid for the picker; the game body itself
-    // takes 'auto' height so it sizes to its own content.
-    const menuHeight = Math.min(620, Math.round(height * 0.72));
-    const greedyLionHeight = Math.min(760, height - insets.top - 12);
-    const gameSheetHeight = gameMenuState === 'menu'
-      ? menuHeight
-      : gameMenuState === 'greedylion'
-        ? greedyLionHeight
-        : 'auto';
     return (
-      <Modal animationType="slide" transparent={true} visible={gameMenuState !== null} onRequestClose={() => setGameMenuState(null)}>
-        <View style={styles.giftModalOverlay}>
-          <View style={[styles.giftModalContent, { paddingBottom: insets.bottom + 20, height: gameSheetHeight }]}>
-
-            {gameMenuState === 'menu' && (
-              <View style={{ flex: 1 }}>
-                <View style={styles.gamePickerHeader}>
-                  <View>
-                    <Text style={styles.gamePickerTitle}>Mini Games</Text>
-                    <Text style={styles.gamePickerSubtitle}>Bet together — one shared round per game</Text>
-                  </View>
-                  <TouchableOpacity onPress={() => setGameMenuState(null)} style={styles.gamePickerClose}>
-                    <Ionicons name="close" size={18} color="rgba(255,255,255,0.7)" />
-                  </TouchableOpacity>
-                </View>
-
-                <ScrollView
-                  showsVerticalScrollIndicator={false}
-                  contentContainerStyle={styles.gameTileGrid}
-                >
-                  {fruitActive && (
-                    <TouchableOpacity
-                      style={styles.gameTile}
-                      activeOpacity={0.85}
-                      onPress={() => setGameMenuState('fruit')}
-                    >
-                      <LinearGradient
-                        colors={['rgba(251,191,36,0.18)', 'rgba(244,114,182,0.10)']}
-                        style={styles.gameTileGrad}
-                      >
-                        <View style={styles.gameTileIconWrap}>
-                          <Text style={styles.gameTileEmoji}>🎰</Text>
-                        </View>
-                        <Text style={styles.gameTileName} numberOfLines={1}>Fruit Roulette</Text>
-                        <Text style={styles.gameTileDesc} numberOfLines={2}>Pick a fruit. Win up to 8×.</Text>
-                        <View style={styles.gameTileChip}>
-                          <Ionicons name="people-outline" size={10} color="#FBBF24" />
-                          <Text style={styles.gameTileChipText}>Multiplayer</Text>
-                        </View>
-                      </LinearGradient>
-                    </TouchableOpacity>
-                  )}
-
-                  {teenPattiActive && (
-                    <TouchableOpacity
-                      style={styles.gameTile}
-                      activeOpacity={0.85}
-                      onPress={() => setGameMenuState('teenpatti')}
-                    >
-                      <LinearGradient
-                        colors={['rgba(6,182,212,0.18)', 'rgba(217,70,239,0.10)']}
-                        style={styles.gameTileGrad}
-                      >
-                        <View style={styles.gameTileIconWrap}>
-                          <Text style={styles.gameTileEmoji}>🃏</Text>
-                        </View>
-                        <Text style={styles.gameTileName} numberOfLines={1}>Teen Patti</Text>
-                        <Text style={styles.gameTileDesc} numberOfLines={2}>Bet on A, B or C. Winner pays 2×.</Text>
-                        <View style={styles.gameTileChip}>
-                          <Ionicons name="people-outline" size={10} color="#06B6D4" />
-                          <Text style={[styles.gameTileChipText, { color: '#06B6D4' }]}>Multiplayer</Text>
-                        </View>
-                      </LinearGradient>
-                    </TouchableOpacity>
-                  )}
-
-                  {greedyLionActive && (
-                    <TouchableOpacity
-                      style={styles.gameTile}
-                      activeOpacity={0.85}
-                      onPress={() => setGameMenuState('greedylion')}
-                    >
-                      <LinearGradient
-                        colors={['rgba(245,199,106,0.20)', 'rgba(126,52,174,0.18)']}
-                        style={styles.gameTileGrad}
-                      >
-                        <View style={styles.gameTileIconWrap}>
-                          <Text style={styles.gameTileEmoji}>🦁</Text>
-                        </View>
-                        <Text style={styles.gameTileName} numberOfLines={1}>Greedy Lion</Text>
-                        <Text style={styles.gameTileDesc} numberOfLines={2}>Pick up to 6 foods. Pizza or Salad wins.</Text>
-                        <View style={styles.gameTileChip}>
-                          <Ionicons name="people-outline" size={10} color="#F5C76A" />
-                          <Text style={[styles.gameTileChipText, { color: '#F5C76A' }]}>Native</Text>
-                        </View>
-                      </LinearGradient>
-                    </TouchableOpacity>
-                  )}
-
-                  {!fruitActive && !teenPattiActive && !greedyLionActive && (
-                    <View style={styles.gameTileEmpty}>
-                      <Ionicons name="game-controller-outline" size={44} color="rgba(255,255,255,0.2)" />
-                      <Text style={styles.gameTileEmptyText}>
-                        Games are temporarily disabled.
-                      </Text>
-                    </View>
-                  )}
-                </ScrollView>
-              </View>
-            )}
-
-            {gameMenuState === 'fruit' && (
-              <FruitRoulette
-                roomId={id}
-                myDiamonds={myDiamonds}
-                setMyDiamonds={setMyDiamonds}
-                onBack={() => setGameMenuState('menu')}
-                onClose={() => setGameMenuState(null)}
-              />
-            )}
-
-            {gameMenuState === 'teenpatti' && (
-              <TeenPatti
-                roomId={id}
-                myDiamonds={myDiamonds}
-                setMyDiamonds={setMyDiamonds}
-                onBack={() => setGameMenuState('menu')}
-                onClose={() => setGameMenuState(null)}
-              />
-            )}
-
-            {gameMenuState === 'greedylion' && (
-              <GreedyLion
-                myDiamonds={myDiamonds}
-                setMyDiamonds={setMyDiamonds}
-                onBack={() => setGameMenuState('menu')}
-                onClose={() => setGameMenuState(null)}
-              />
-            )}
-
-          </View>
-        </View>
-      </Modal>
+      <GamesBottomSheet
+        gameMenuState={gameMenuState}
+        setGameMenuState={setGameMenuState}
+        insetsTop={insets.top}
+        insetsBottom={insets.bottom}
+        roomId={id}
+        myDiamonds={myDiamonds}
+        setMyDiamonds={setMyDiamonds}
+        fruitActive={fruitActive}
+        teenPattiActive={teenPattiActive}
+        greedyLionActive={greedyLionActive}
+      />
     );
   };
 
@@ -4304,7 +4359,7 @@ export default function BroadcastRoomScreen() {
                   <View style={{ flex: 1 }}>
                     {(isMe && isAgoraPublisher && isCamOn && agora.joined) ? (
                       <View style={{ flex: 1 }}>
-                        <RtcSurfaceView
+                        <AgoraVideoView
                           key={`local-${isAgoraPublisher ? 'pub' : 'sub'}-${agora.joined}`}
                           style={styles.guestVideoFeed}
                           canvas={{ uid: 0 }}
@@ -4312,7 +4367,7 @@ export default function BroadcastRoomScreen() {
                         {renderFilterOverlay()}
                       </View>
                     ) : (agora.joined && agora.remoteUids.includes(agoraUidFromId(String(guest.id))) && !agora.videoOffUids.includes(agoraUidFromId(String(guest.id)))) ? (
-                      <RtcSurfaceView
+                      <AgoraVideoView
                         key={`remote-${agoraUidFromId(String(guest.id))}`}
                         style={styles.guestVideoFeed}
                         canvas={{ uid: agoraUidFromId(String(guest.id)) }}
@@ -5610,6 +5665,7 @@ export default function BroadcastRoomScreen() {
       setLuckyBagCountdown(0);
       return undefined;
     }
+    if (gameSheetOpen) return undefined;
     const dropMs = new Date(activeLuckyBag.dropAt).getTime();
     const revealAt = dropMs + 15000; // 15-second reveal delay
     const tick = () => {
@@ -5626,7 +5682,7 @@ export default function BroadcastRoomScreen() {
     const t = setInterval(tick, 250);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeLuckyBag?.dropAt, activeLuckyBag?.id]);
+  }, [activeLuckyBag?.dropAt, activeLuckyBag?.id, gameSheetOpen]);
 
   // Run the entrance + pulse animations whenever a new bag opens up.
   // The drop spring is one-shot (settles in ~600 ms with a small
@@ -6501,12 +6557,12 @@ export default function BroadcastRoomScreen() {
         <View style={[StyleSheet.absoluteFillObject, { overflow: 'hidden', backgroundColor: '#000' }]}>
           {(isHostView && isCamOn && agora.joined) ? (
             <View style={StyleSheet.absoluteFillObject}>
-              <RtcSurfaceView style={StyleSheet.absoluteFillObject} canvas={{ uid: 0 }} />
+              <AgoraVideoView style={StyleSheet.absoluteFillObject} canvas={{ uid: 0 }} />
               {renderFilterOverlay()}
             </View>
           ) : (!isHostView && agora.joined && agora.remoteUids.includes(hostUid) && !agora.videoOffUids.includes(hostUid)) ? (
             <View style={StyleSheet.absoluteFillObject}>
-              <RtcSurfaceView style={StyleSheet.absoluteFillObject} canvas={{ uid: hostUid }} />
+              <AgoraVideoView style={StyleSheet.absoluteFillObject} canvas={{ uid: hostUid }} />
             </View>
           ) : (
             <View style={[StyleSheet.absoluteFillObject, { backgroundColor: BRAND.splashBg, justifyContent: 'center', alignItems: 'center' }]}>
@@ -6537,7 +6593,14 @@ export default function BroadcastRoomScreen() {
 
       {/* Layer 1: Core Interface & Specialized Backgrounds (Duo/Audio) */}
       <View style={styles.container} {...(!isHostView ? panResponder.panHandlers : {})}>
-        {isAudio ? (
+        {audioGameCovered ? (
+          <View style={[StyleSheet.absoluteFillObject, { backgroundColor: BRAND.splashBg }]}>
+            <LinearGradient
+              colors={['rgba(126,52,174,.34)', 'rgba(4,0,35,.78)']}
+              style={StyleSheet.absoluteFillObject}
+            />
+          </View>
+        ) : isAudio ? (
           <View style={StyleSheet.absoluteFillObject}>
             <Image source={AUDIO_ROOM_BACKGROUND} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
             <LinearGradient
@@ -6572,6 +6635,8 @@ export default function BroadcastRoomScreen() {
             The flex:1 chat then shrinks naturally, and the input lands just
             above the keyboard on any device size. */}
         <View style={[styles.overlayForeground, isKeyboardVisible && { bottom: keyboardHeight }]}>
+          {!audioGameCovered && (
+            <>
           {currentMusic && (
             <TouchableOpacity
               style={styles.musicMarquee}
@@ -6697,12 +6762,14 @@ export default function BroadcastRoomScreen() {
               </TouchableOpacity>
             </View>
           )}
+            </>
+          )}
 
 
         </View>
 
         {/* Full Screen Lottie Magic Animation overlay */}
-        {activeGiftAnimation.source && (
+        {!audioGameCovered && activeGiftAnimation.source && (
           <View style={styles.lottieFullScreenContainer} pointerEvents="none">
             <LottieView
               key={activeGiftAnimation.id}
@@ -6720,7 +6787,7 @@ export default function BroadcastRoomScreen() {
             />
           </View>
         )}
-        {activeMallIntro && activeMallIntroSource ? (
+        {!audioGameCovered && activeMallIntro && activeMallIntroSource ? (
           <MallIntroOverlay
             key={activeMallIntro.id}
             intro={activeMallIntro}
@@ -6731,7 +6798,7 @@ export default function BroadcastRoomScreen() {
 
         {/* Gift sender banner — rendered AFTER the gift animation so the
             sender's name sits ON TOP of the gift, not hidden behind it. */}
-        {renderFloatingGiftToast()}
+        {!audioGameCovered && renderFloatingGiftToast()}
 
         {/* Modals placed last to overlay correctly naturally */}
         {renderLiveEndedForViewer()}
@@ -6739,7 +6806,7 @@ export default function BroadcastRoomScreen() {
         {renderMusicPickerModal()}
         {renderManageCallsModal()}
         {renderGamesBottomSheet()}
-        {renderGiftBottomSheet()}
+        {!audioGameCovered && renderGiftBottomSheet()}
         {renderTopUpModal()}
         {renderHostProfileModal()}
         {renderPremiumAdminModal()}
@@ -6751,8 +6818,8 @@ export default function BroadcastRoomScreen() {
         {renderReportModal()}
         {renderRankingSheet()}
         {renderLuckyBagDropModal()}
-        {renderActiveLuckyBag()}
-        {renderLuckyBagWinnersModal()}
+        {!audioGameCovered && renderActiveLuckyBag()}
+        {!audioGameCovered && renderLuckyBagWinnersModal()}
         {renderBeautySheet()}
         {renderHostToolsSheet()}
         {renderHostMoreMenu()}
@@ -6760,7 +6827,7 @@ export default function BroadcastRoomScreen() {
         {/* Audio room background picker — host-only, audio-only. The
             sheet itself enforces the same gates, but rendering only
             when relevant keeps the modal tree tidy. */}
-        {isHostView && isAudio && (
+        {isHostView && isAudio && !audioGameCovered && (
           <AudioTemplateSheet
             visible={showAudioTemplates}
             onClose={() => setShowAudioTemplates(false)}
@@ -6769,14 +6836,16 @@ export default function BroadcastRoomScreen() {
             onApplied={(id) => setActiveTemplateId(id)}
           />
         )}
-        {showSFXMenu && renderSFXMenu()}
+        {!audioGameCovered && showSFXMenu && renderSFXMenu()}
 
         {/* Floating Reactions Layer */}
-        <View style={styles.reactionsOverlay} pointerEvents="none">
-          {reactions.map(reaction => (
-            <FloatingEmoji key={reaction.id} type={reaction.type} offset={reaction.x} />
-          ))}
-        </View>
+        {!audioGameCovered && (
+          <View style={styles.reactionsOverlay} pointerEvents="none">
+            {reactions.map(reaction => (
+              <FloatingEmoji key={reaction.id} type={reaction.type} offset={reaction.x} />
+            ))}
+          </View>
+        )}
       </View>
     </>
   );
