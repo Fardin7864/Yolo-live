@@ -1653,8 +1653,10 @@ export default function BroadcastRoomScreen() {
 
   // Sync camera on/off â†’ Agora local video (video rooms only)
   useEffect(() => {
-    if (agora.joined && !isAudio) agora.setCameraEnabled(isCamOn);
-  }, [isCamOn, agora.joined, isAudio]);
+    if (agora.joined && !isAudio && isAgoraPublisher) {
+      agora.setCameraEnabled(isCamOn);
+    }
+  }, [isCamOn, agora.joined, isAudio, isAgoraPublisher]);
 
   // Real Agora beauty filter — built-in, free with the Video SDK we already
   // ship. Smoothness/Whiten/Redness/Sharpness map from 0..4 → 0.0..0.95.

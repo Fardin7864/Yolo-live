@@ -84,6 +84,7 @@ export function useAgoraEngine({ channelName, role, isVideo, enabled = true }) {
         }
         engine.setClientRole(ClientRoleType.ClientRoleBroadcaster);
         if (isVideo) {
+          try { engine.muteAllRemoteVideoStreams(false); } catch (_) {}
           engine.enableLocalVideo(true);
           engine.muteLocalVideoStream(false);
           engine.startPreview();
@@ -91,15 +92,20 @@ export function useAgoraEngine({ channelName, role, isVideo, enabled = true }) {
         engine.updateChannelMediaOptions({
           publishMicrophoneTrack: true,
           publishCameraTrack: isVideo,
+          autoSubscribeAudio: true,
+          autoSubscribeVideo: isVideo,
         });
       } else {
         engine.setClientRole(ClientRoleType.ClientRoleAudience);
         if (isVideo) {
+          try { engine.muteAllRemoteVideoStreams(false); } catch (_) {}
           try { engine.stopPreview(); } catch (_) {}
         }
         engine.updateChannelMediaOptions({
           publishMicrophoneTrack: false,
           publishCameraTrack: false,
+          autoSubscribeAudio: true,
+          autoSubscribeVideo: isVideo,
         });
       }
     } catch (e) {
@@ -427,8 +433,14 @@ export function useAgoraEngine({ channelName, role, isVideo, enabled = true }) {
       if (!engine) return;
       engine.enableLocalVideo(on);
       engine.muteLocalVideoStream(!on);
+      engine.updateChannelMediaOptions({
+        publishMicrophoneTrack: true,
+        publishCameraTrack: !!on && isVideo,
+        autoSubscribeAudio: true,
+        autoSubscribeVideo: isVideo,
+      });
     } catch (_) {}
-  }, []);
+  }, [isVideo]);
 
   const setRemoteVideoPaused = useCallback((paused) => {
     try {
