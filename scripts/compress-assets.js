@@ -6,11 +6,9 @@
  * Requires `sharp` (will prompt to install on first run if missing).
  *
  * What it does:
- *   - assets/images/card_back.png      2.4 MB -> ~250 KB  (PNG, downscaled)
- *   - assets/images/frame_vip.png      1.8 MB -> ~200 KB
- *   - assets/images/frame_vvip.png     2.1 MB -> ~250 KB
+ *   - assets/images/card_back.webp     recompresses the Teen Patti card back
  *
- * Backups are written next to the originals as *.png.bak so you can
+ * Backups are written next to the originals as *.bak so you can
  * roll back if you don't like the quality.
  */
 
@@ -28,12 +26,10 @@ try {
 
 const ROOT = path.resolve(__dirname, '..');
 
-// Each entry: { file, maxWidth, quality }
-// maxWidth caps the longer side; quality is PNG zlib level + palette.
+// Each entry: { file, maxWidth }
+// maxWidth caps the longer side; WebP keeps the app bundle smaller than PNG.
 const TARGETS = [
-  { file: 'assets/images/card_back.png',  maxWidth: 600 },
-  { file: 'assets/images/frame_vip.png',  maxWidth: 600 },
-  { file: 'assets/images/frame_vvip.png', maxWidth: 600 },
+  { file: 'assets/images/card_back.webp', maxWidth: 600 },
 ];
 
 async function compressOne({ file, maxWidth }) {
@@ -53,7 +49,7 @@ async function compressOne({ file, maxWidth }) {
 
   const buf = await sharp(backup)
     .resize({ width: maxWidth, withoutEnlargement: true })
-    .png({ compressionLevel: 9, palette: true, quality: 80 })
+    .webp({ quality: 78, effort: 6, smartSubsample: true })
     .toBuffer();
 
   fs.writeFileSync(abs, buf);
@@ -72,5 +68,5 @@ async function compressOne({ file, maxWidth }) {
       console.error(`  fail ${t.file}: ${err.message}`);
     }
   }
-  console.log('\nDone. Backups saved as *.png.bak — delete them once you confirm quality is OK.');
+  console.log('\nDone. Backups saved as *.bak — delete them once you confirm quality is OK.');
 })();

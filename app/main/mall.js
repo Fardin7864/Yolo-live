@@ -13,7 +13,7 @@ import { supabase } from '../../src/api/supabase';
 import LogoLoader from '../../src/components/LogoLoader';
 import { useOneShotIntroPlayer } from '../../src/hooks/useOneShotIntroPlayer';
 
-const BANNER = require('../../assets/mall/unique-props-banner.png');
+const BANNER = require('../../assets/mall/unique-props-banner.webp');
 
 const CATEGORIES = ['Intro', 'Frame'];
 
@@ -330,12 +330,6 @@ export default function MallScreen() {
     return () => { supabase.removeChannel(channel); };
   }, [loadIntros]);
 
-  useEffect(() => {
-    if (mode !== 'mall' || category !== 'Intro') return undefined;
-    const timer = setInterval(loadIntros, 2500);
-    return () => clearInterval(timer);
-  }, [category, loadIntros, mode]);
-
   const loadFrames = useCallback(async () => {
     const { data, error } = await supabase.from('profile_frames').select('*')
       .eq('is_active', true).order('display_order').order('created_at');
@@ -365,12 +359,6 @@ export default function MallScreen() {
       });
     return () => { supabase.removeChannel(channel); };
   }, [loadFrames]);
-
-  useEffect(() => {
-    if (mode !== 'mall' || category !== 'Frame') return undefined;
-    const timer = setInterval(loadFrames, 2500);
-    return () => clearInterval(timer);
-  }, [category, loadFrames, mode]);
 
   const loadProps = useCallback(async (refresh = false) => {
     if (refresh) setRefreshing(true);

@@ -8,7 +8,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import GreedyLion from '../../../src/components/games/GreedyLion';
 import { useGlobalState } from '../../../src/context/GlobalStateContext';
 
-const APP_BACKGROUND = require('../../../assets/backgrounds/neon-space.png');
+const APP_BACKGROUND = require('../../../assets/backgrounds/neon-space.webp');
 const BETS = [100, 1000, 5000, 50000, 100000];
 
 const GAME_META = {

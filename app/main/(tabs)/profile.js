@@ -12,9 +12,9 @@ import { supabase } from '../../../src/api/supabase';
 import { useResponsive } from '../../../src/hooks/useResponsive';
 
 const PROFILE_ASSETS = {
-  background: require('../../../assets/profile/background.png'),
-  vipBanner: require('../../../assets/profile/vip-banner.png'),
-  avatarFrame: require('../../../assets/profile/avatar-frame.png'),
+  background: require('../../../assets/profile/background.webp'),
+  vipBanner: require('../../../assets/profile/vip-banner.webp'),
+  avatarFrame: require('../../../assets/profile/avatar-frame.webp'),
   verified: require('../../../assets/profile/verified.png'),
   settings: require('../../../assets/profile/settings.png'),
   visitors: require('../../../assets/profile/visitors.png'),

@@ -4,10 +4,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system';
 
 import { supabase } from '../../src/api/supabase';
 import { useGlobalState } from '../../src/context/GlobalStateContext';
 import CountryModal from '../../src/components/auth/CountryModal';
+
+const MAX_AVATAR_IMAGE_KB = 300;
 
 export default function EditProfileScreen() {
   const router = useRouter();
@@ -27,14 +30,24 @@ export default function EditProfileScreen() {
   const pickImage = async () => {
     let result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: false, // Cropping বন্ধ করা হলো
-      quality: 0.5,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.45,
     });
 
     if (!result.canceled) {
       setLoading(true);
       try {
         const file = result.assets[0];
+        const info = await FileSystem.getInfoAsync(file.uri, { size: true });
+        const sizeKb = info?.size ? Math.round(info.size / 1024) : 0;
+        if (sizeKb > MAX_AVATAR_IMAGE_KB) {
+          Alert.alert(
+            'Image too large',
+            `This image is ${sizeKb} KB. Please pick a smaller image or crop it tighter.`
+          );
+          return;
+        }
         const fileExt = file.uri.split('.').pop().toLowerCase();
         const fileName = `${user.id}-${Date.now()}.${fileExt}`;
         

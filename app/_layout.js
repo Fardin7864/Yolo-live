@@ -24,7 +24,7 @@ import {
 } from '../src/lib/firebase';
 import "../global.css";
 
-const APP_BACKGROUND = require('../assets/backgrounds/neon-space.png');
+const APP_BACKGROUND = require('../assets/backgrounds/neon-space.webp');
 
 // Phase B: install the JS-side crash hook ONCE per process. The handler
 // is a no-op when re-called (the helper is idempotent), so module-level

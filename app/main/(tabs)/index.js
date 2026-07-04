@@ -14,7 +14,7 @@ import { supabase } from '../../../src/api/supabase';
 
 const LOCAL_HERO = require('../../../assets/onboarding/welcome-loading.webp');
 const LOCAL_AVATAR = require('../../../assets/splash-icon.png');
-const APP_BACKGROUND = require('../../../assets/backgrounds/neon-space.png');
+const APP_BACKGROUND = require('../../../assets/backgrounds/neon-space.webp');
 const AUTH_BACKGROUND = require('../../../assets/onboarding/google-auth-background.webp');
 const SECTION_ICONS = {
   events: require('../../../assets/home/icons/events.png'),
@@ -28,9 +28,9 @@ const ACTION_ICONS = {
   tasks: require('../../../assets/home/icons/tasks.png'),
 };
 const EMPTY_BACKGROUNDS = {
-  events: require('../../../assets/home/empty/events.png'),
-  nearby: require('../../../assets/home/empty/nearby.png'),
-  live: require('../../../assets/home/empty/live.png'),
+  events: require('../../../assets/home/empty/events.webp'),
+  nearby: require('../../../assets/home/empty/nearby.webp'),
+  live: require('../../../assets/home/empty/live.webp'),
 };
 const HOME_PROFILE_FRAMES = {
   'heart-fantasy': require('../../../assets/mall/frames/heart-fantasy.webp'),

@@ -624,7 +624,7 @@ export default function TeenPatti({ roomId, myDiamonds, setMyDiamonds, onBack, o
     return (
       <View key={index} style={[styles.cardWrapper, { width: cardW, height: cardH }]}>
         <Animated.View style={[styles.card, styles.cardAbsolute, { width: cardW, height: cardH, transform: [{ rotateY: backRotateY }] }]}>
-          <Image source={require('../../../assets/images/card_back.png')} style={styles.cardBackImage} />
+          <Image source={require('../../../assets/images/card_back.webp')} style={styles.cardBackImage} />
         </Animated.View>
         <Animated.View style={[styles.card, { width: cardW, height: cardH, transform: [{ rotateY: frontRotateY }] }]}>
           <Text style={[styles.cardVal, { color: (card.suit === '♥' || card.suit === '♦') ? '#EF4444' : '#000' }]}>
@@ -684,7 +684,7 @@ export default function TeenPatti({ roomId, myDiamonds, setMyDiamonds, onBack, o
                     [0,1,2].map(i => (
                       <View key={i} style={[styles.cardWrapper, { width: cardW, height: cardH }]}>
                         <View style={[styles.cardBackPlaceholder, { width: cardW, height: cardH }]}>
-                          <Image source={require('../../../assets/images/card_back.png')} style={styles.cardBackImage} />
+                          <Image source={require('../../../assets/images/card_back.webp')} style={styles.cardBackImage} />
                         </View>
                       </View>
                     ))

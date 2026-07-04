@@ -20,8 +20,8 @@ import { flagFor } from '../../../src/utils/countryFlag';
 
 const PROFILE_ASSETS = {
   background: require('../../../assets/public-profile/cosmic-background.webp'),
-  back: require('../../../assets/public-profile/back.png'),
-  menu: require('../../../assets/public-profile/menu.png'),
+  back: require('../../../assets/public-profile/back.webp'),
+  menu: require('../../../assets/public-profile/menu.webp'),
 };
 
 const isUuid = (value) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(value || ''));

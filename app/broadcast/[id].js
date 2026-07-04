@@ -56,7 +56,7 @@ const AUDIO_SEAT_FRAME = require('../../assets/audio-room/redesign/seat.webp');
 const AUDIO_BACK_BUTTON = require('../../assets/audio-room/redesign/back.webp');
 const AUDIO_MORE_BUTTON = require('../../assets/audio-room/redesign/more.webp');
 const AUDIO_SVIP_BADGE = require('../../assets/audio-room/redesign/svip.webp');
-const AUDIO_HOST_BANNER_BG = require('../../assets/audio-room/redesign/host-banner.png');
+const AUDIO_HOST_BANNER_BG = require('../../assets/audio-room/redesign/host-banner.webp');
 const PROFILE_FRAME_ASSETS = {
   'heart-fantasy': require('../../assets/mall/frames/heart-fantasy.webp'),
   'angel-wing': require('../../assets/mall/frames/angel-wing.webp'),
