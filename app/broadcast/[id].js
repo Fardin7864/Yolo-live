@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { View, Text, StyleSheet, Image, TouchableOpacity, FlatList, TextInput, Platform, Dimensions, Modal, Alert, Keyboard, Animated, Easing, ScrollView, StatusBar, BackHandler, PanResponder, AppState } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { KeyboardEvents } from 'react-native-keyboard-controller';
 import { showCuteAlert, confirmCuteAlert } from '../../src/components/CuteAlert';
@@ -37,7 +36,6 @@ const { width, height } = Dimensions.get('screen');
 const AgoraVideoView = Platform.OS === 'android' ? RtcTextureView : RtcSurfaceView;
 const MALL_INTRO_MAX_HEIGHT = height * 0.92;
 const MALL_INTRO_WIDTH = width;
-const MALL_INTRO_PLAYED_STORAGE_PREFIX = 'mall_intro_played_v1';
 
 // ─────────────────────────────────────────────────────────────────────
 // Lucky Bag asset
@@ -424,7 +422,7 @@ export default function BroadcastRoomScreen() {
   const [activeMallIntro, setActiveMallIntro] = useState(null);
   const [mallIntroQueue, setMallIntroQueue] = useState([]);
   const playedMallIntroUserIdsRef = useRef(new Set());
-  const sentMallIntroUserIdsRef = useRef(new Set());
+  const sentMallIntroVisitRef = useRef(new Set());
   const activeMallIntroSource = useMemo(
     () => activeMallIntro ? mallIntroMediaSource(activeMallIntro.videoUrl || activeMallIntro.video_url) : null,
     [activeMallIntro]
@@ -641,30 +639,25 @@ export default function BroadcastRoomScreen() {
     if (!liveStreamKey || !channelRef.current || !introUser?.id || !introUser?.selectedMallIntro || !introUser?.selectedMallIntroVideoUrl) {
       return;
     }
-    const userKey = `${liveStreamKey}:${introUser.id}`;
-    if (sentMallIntroUserIdsRef.current.has(userKey)) return;
-    sentMallIntroUserIdsRef.current.add(userKey);
-    const storageKey = `${MALL_INTRO_PLAYED_STORAGE_PREFIX}:${userKey}`;
-    try {
-      const alreadyPlayed = await AsyncStorage.getItem(storageKey);
-      if (alreadyPlayed) return;
-      await AsyncStorage.setItem(storageKey, '1');
-    } catch (e) {
-      if (__DEV__) console.warn('mall intro played storage:', e?.message || e);
-    }
+    const visitKey = `${liveStreamKey}:${introUser.id}`;
+    if (sentMallIntroVisitRef.current.has(visitKey)) return;
+    sentMallIntroVisitRef.current.add(visitKey);
+    const ts = Date.now();
+    const eventKey = `${liveStreamKey}:${introUser.id}:${ts}`;
     const payload = {
       id: introUser.id,
-      ts: Date.now(),
+      ts,
+      eventKey,
       name: introUser.name || 'A viewer',
       liveStreamId: liveStreamKey,
       introId: introUser.selectedMallIntro,
       videoUrl: introUser.selectedMallIntroVideoUrl,
       thumbnailUrl: introUser.selectedMallIntroThumbnailUrl,
     };
-    if (!playedMallIntroUserIdsRef.current.has(userKey)) {
-      playedMallIntroUserIdsRef.current.add(userKey);
+    if (!playedMallIntroUserIdsRef.current.has(eventKey)) {
+      playedMallIntroUserIdsRef.current.add(eventKey);
       queueMallIntro({
-        id: `${payload.id}-${payload.ts}`,
+        id: eventKey,
         name: payload.name,
         videoUrl: payload.videoUrl,
         audioUrl: payload.audioUrl || payload.audio_url || null,
@@ -1974,11 +1967,11 @@ export default function BroadcastRoomScreen() {
       .on('broadcast', { event: 'mall_intro' }, ({ payload }) => {
         if (!payload?.id || !payload?.videoUrl) return;
         const introLiveKey = String(payload.liveStreamId || streamRecordId || id);
-        const userKey = `${introLiveKey}:${payload.id}`;
-        if (playedMallIntroUserIdsRef.current.has(userKey)) return;
-        playedMallIntroUserIdsRef.current.add(userKey);
+        const eventKey = payload.eventKey || `${introLiveKey}:${payload.id}:${payload.ts || Date.now()}`;
+        if (playedMallIntroUserIdsRef.current.has(eventKey)) return;
+        playedMallIntroUserIdsRef.current.add(eventKey);
         queueMallIntro({
-          id: `${payload.id}-${payload.ts || Date.now()}`,
+          id: eventKey,
           name: payload.name || 'Special entrance',
           videoUrl: payload.videoUrl,
           audioUrl: payload.audioUrl || payload.audio_url || null,

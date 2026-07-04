@@ -15,7 +15,7 @@ import { useOneShotIntroPlayer } from '../../src/hooks/useOneShotIntroPlayer';
 
 const BANNER = require('../../assets/mall/unique-props-banner.png');
 
-const CATEGORIES = ['Intro', 'Frame', 'Dress Up', 'Room Frame', 'Business Card'];
+const CATEGORIES = ['Intro', 'Frame'];
 
 const BUNDLED_INTRO_ASSETS = {
   'football-cup.webp': require('../../assets/mall/intro/football-cup.webp'),
