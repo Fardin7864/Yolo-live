@@ -1450,6 +1450,50 @@ export default function BroadcastRoomScreen() {
   // The broadcaster's deterministic Agora uid — used by viewers to render the
   // host's remote feed in the fullscreen background.
   const hostUid = agoraUidFromId(String(id || ''));
+  const setAgoraPublishing = agora.setPublishing;
+
+  // Admin dashboard room-block safety net. This is scoped to the
+  // current broadcast screen only, so it does not add global app load.
+  // It covers both users who were blocked before entry and users blocked
+  // while already inside the live.
+  useEffect(() => {
+    if (isHostView || !user?.id || !id) return undefined;
+    let cancelled = false;
+
+    const ejectFromRoom = (title = 'Removed', message = 'You have been removed from this live.') => {
+      if (ejectedRef.current) return;
+      ejectedRef.current = true;
+      try { setAgoraPublishing(false); } catch (e) { if (__DEV__) console.warn('broadcast cleanup:', e?.message); }
+      showCuteAlert(title, message);
+      router.replace('/main/(tabs)/');
+    };
+
+    (async () => {
+      const { data } = await supabase.rpc('room_get_blocks', { room_host: id });
+      if (cancelled || !Array.isArray(data)) return;
+      if (data.some((row) => row?.blocked_id === user.id)) {
+        ejectFromRoom('Removed', 'You are blocked from this live.');
+      }
+    })();
+
+    const ch = supabase
+      .channel(`room-blocks-${id}-${user.id}-${Date.now()}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'room_blocks', filter: `host_id=eq.${id}` },
+        ({ new: row }) => {
+          if (row?.blocked_id === user.id) {
+            ejectFromRoom('Removed', 'You have been blocked from this live.');
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      cancelled = true;
+      try { supabase.removeChannel(ch); } catch (e) { if (__DEV__) console.warn('broadcast cleanup:', e?.message); }
+    };
+  }, [isHostView, user?.id, id, setAgoraPublishing, router]);
 
   // Viewer-side "Joining" safety timeout. Starts on mount, clears the
   // moment the host's Agora uid lights up in remoteUids (= the host
@@ -1976,6 +2020,17 @@ export default function BroadcastRoomScreen() {
           videoUrl: payload.videoUrl,
           audioUrl: payload.audioUrl || payload.audio_url || null,
         });
+      })
+      .on('broadcast', { event: 'admin_room_block' }, ({ payload }) => {
+        if (isHostView) return;
+        const blocked = payload?.target === user?.id
+          || (Array.isArray(payload?.blockedUsers) && payload.blockedUsers.includes(user?.id));
+        if (blocked && !ejectedRef.current) {
+          ejectedRef.current = true;
+          try { agora.setPublishing(false); } catch (e) { if (__DEV__) console.warn('broadcast cleanup:', e?.message); }
+          showCuteAlert('Removed', 'You have been blocked from this live.');
+          router.replace('/main/(tabs)/');
+        }
       })
       .on('broadcast', { event: 'room_state' }, ({ payload }) => {
         // Viewers/guests mirror the host's synced controls (title, goal,
