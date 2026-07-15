@@ -19,6 +19,7 @@ import { useKeepAwake } from 'expo-keep-awake';
 import FruitRoulette from '../../src/components/games/FruitRoulette';
 import TeenPatti from '../../src/components/games/TeenPatti';
 import GreedyLion from '../../src/components/games/GreedyLion';
+import TinPattiPro from '../../src/components/games/TinPattiPro';
 import AudioTemplateSheet from '../../src/components/audio/AudioTemplateSheet';
 import { useGlobalState } from '../../src/context/GlobalStateContext';
 import { resolveGiftAnimation } from '../../src/theme/giftAnimations';
@@ -86,18 +87,20 @@ const GamesBottomSheet = React.memo(function GamesBottomSheet({
   fruitActive,
   teenPattiActive,
   greedyLionActive,
+  tinPattiProActive,
 }) {
   const closeGames = useCallback(() => setGameMenuState(null), [setGameMenuState]);
   const backToMenu = useCallback(() => setGameMenuState('menu'), [setGameMenuState]);
   const openFruit = useCallback(() => setGameMenuState('fruit'), [setGameMenuState]);
   const openTeenPatti = useCallback(() => setGameMenuState('teenpatti'), [setGameMenuState]);
   const openGreedyLion = useCallback(() => setGameMenuState('greedylion'), [setGameMenuState]);
+  const openTinPattiPro = useCallback(() => setGameMenuState('tinpattipro'), [setGameMenuState]);
 
   const menuHeight = Math.min(620, Math.round(height * 0.72));
   const greedyLionHeight = Math.min(760, height - insetsTop - 12);
   const gameSheetHeight = gameMenuState === 'menu'
     ? menuHeight
-    : gameMenuState === 'greedylion'
+    : gameMenuState === 'greedylion' || gameMenuState === 'tinpattipro'
       ? greedyLionHeight
       : 'auto';
 
@@ -191,7 +194,30 @@ const GamesBottomSheet = React.memo(function GamesBottomSheet({
                   </TouchableOpacity>
                 )}
 
-                {!fruitActive && !teenPattiActive && !greedyLionActive && (
+                {tinPattiProActive && (
+                  <TouchableOpacity
+                    style={styles.gameTile}
+                    activeOpacity={0.85}
+                    onPress={openTinPattiPro}
+                  >
+                    <LinearGradient
+                      colors={['rgba(255,197,93,0.22)', 'rgba(10,132,105,0.16)']}
+                      style={styles.gameTileGrad}
+                    >
+                      <View style={styles.gameTileIconWrap}>
+                        <Text style={styles.gameTileEmoji}>TP</Text>
+                      </View>
+                      <Text style={styles.gameTileName} numberOfLines={1}>Tin Patti Pro</Text>
+                      <Text style={styles.gameTileDesc} numberOfLines={2}>One global card table for everyone.</Text>
+                      <View style={styles.gameTileChip}>
+                        <Ionicons name="people-outline" size={10} color="#F5C76A" />
+                        <Text style={[styles.gameTileChipText, { color: '#F5C76A' }]}>Global</Text>
+                      </View>
+                    </LinearGradient>
+                  </TouchableOpacity>
+                )}
+
+                {!fruitActive && !teenPattiActive && !greedyLionActive && !tinPattiProActive && (
                   <View style={styles.gameTileEmpty}>
                     <Ionicons name="game-controller-outline" size={44} color="rgba(255,255,255,0.2)" />
                     <Text style={styles.gameTileEmptyText}>
@@ -225,6 +251,15 @@ const GamesBottomSheet = React.memo(function GamesBottomSheet({
 
           {gameMenuState === 'greedylion' && (
             <GreedyLion
+              myDiamonds={myDiamonds}
+              setMyDiamonds={setMyDiamonds}
+              onBack={backToMenu}
+              onClose={closeGames}
+            />
+          )}
+
+          {gameMenuState === 'tinpattipro' && (
+            <TinPattiPro
               myDiamonds={myDiamonds}
               setMyDiamonds={setMyDiamonds}
               onBack={backToMenu}
@@ -388,6 +423,7 @@ export default function BroadcastRoomScreen() {
   const fruitActive    = gameSettings?.fruit_roulette?.is_active !== false;
   const teenPattiActive = gameSettings?.teen_patti?.is_active     !== false;
   const greedyLionActive = gameSettings?.greedy_lion?.is_active !== false;
+  const tinPattiProActive = gameSettings?.tin_patti_pro?.is_active !== false;
 
   // Gift catalogue, normalised from the DB into the legacy GIFT_ITEMS
   // shape the rest of this file already speaks. Falls back to the local
@@ -3403,10 +3439,10 @@ export default function BroadcastRoomScreen() {
               <TouchableOpacity
                 style={styles.adminActionItem}
                 onPress={() => {
-                  // Room admins (non-host) cannot remove VIP / VVIP members.
-                  if (!isHostView && ['VIP', 'VVIP'].includes(targetGuest.vipType)) {
+                  // Room admins (non-host) cannot remove VIP / SVIP / VVIP members.
+                  if (!isHostView && ['VIP', 'SVIP', 'VVIP'].includes(targetGuest.vipType)) {
                     setShowAdminMenu(false);
-                    showCuteAlert('Not allowed', 'Room admins cannot remove VIP / VVIP members.');
+                    showCuteAlert('Not allowed', 'Room admins cannot remove VIP / SVIP / VVIP members.');
                     return;
                   }
                   applySeats(activeGuests.map(g => (g && g.id === targetGuest.id) ? null : g));
@@ -3957,6 +3993,7 @@ export default function BroadcastRoomScreen() {
         fruitActive={fruitActive}
         teenPattiActive={teenPattiActive}
         greedyLionActive={greedyLionActive}
+        tinPattiProActive={tinPattiProActive}
       />
     );
   };

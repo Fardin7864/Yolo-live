@@ -32,29 +32,39 @@ const BUNDLED_INTROS = {
 
 const FALLBACK_PACKAGES = [
   {
-    id: 'vip-royal-entry',
-    name: 'Royal Entry VIP',
-    price: 50000,
+    id: 'svip-royal-duo',
+    name: 'Royal Duo SVIP',
+    price: 120000,
     duration_days: 30,
-    features: ['VIP badge', 'Color name', 'Entrance effect', 'VIP-only frame'],
+    features: ['SVIP tag on name', 'Premium entry banner', '2 SVIP-only frames', '2 SVIP-only intros'],
     intro_name: 'Football Champions Cup',
     intro_thumbnail_url: 'bundled://football-cup.webp',
     intro_video_url: 'bundled://football-cup.m4v',
+    intro2_name: 'Blue Rose Bouquet',
+    intro2_thumbnail_url: 'bundled://blue-roses.webp',
+    intro2_video_url: 'bundled://blue-roses.m4v',
     frame_name: 'Royal Gold',
     frame_url: 'bundled://royal-gold',
+    frame2_name: 'Angel Wing',
+    frame2_url: 'bundled://angel-wing',
     accent_color: '#FBBF24',
   },
   {
-    id: 'vip-blue-rose',
-    name: 'Blue Rose VIP',
-    price: 42000,
+    id: 'svip-fantasy-star',
+    name: 'Fantasy Star SVIP',
+    price: 95000,
     duration_days: 30,
-    features: ['VIP badge', 'Priority room entrance', 'Blue Rose intro', 'VIP-only profile frame'],
+    features: ['SVIP name tag', 'Priority room entrance', '2 exclusive frames', '2 exclusive intros'],
     intro_name: 'Blue Rose Bouquet',
     intro_thumbnail_url: 'bundled://blue-roses.webp',
     intro_video_url: 'bundled://blue-roses.m4v',
+    intro2_name: 'Football Champions Cup',
+    intro2_thumbnail_url: 'bundled://football-cup.webp',
+    intro2_video_url: 'bundled://football-cup.m4v',
     frame_name: 'Heart Fantasy',
     frame_url: 'bundled://heart-fantasy',
+    frame2_name: 'Royal Gold',
+    frame2_url: 'bundled://royal-gold',
     accent_color: '#38BDF8',
   },
 ];
@@ -101,7 +111,7 @@ function AvatarPreview({ user, frameUrl }) {
 }
 
 function IntroPreviewModal({ item, onClose }) {
-  const source = useMemo(() => introSource(item?.intro_video_url) || DEFAULT_INTRO_VIDEO, [item?.intro_video_url]);
+  const source = useMemo(() => introSource(item?.videoUrl) || DEFAULT_INTRO_VIDEO, [item?.videoUrl]);
   const { player, ready, finish } = useOneShotIntroPlayer(source, onClose);
 
   return (
@@ -130,12 +140,13 @@ function FeaturePill({ text }) {
   );
 }
 
-function VipPackageCard({
+function SvipPackageCard({
   item, user, busy, selected, owned, onPreview, onBuy, onUse,
 }) {
   const accent = item.accent_color || '#FBBF24';
   const features = Array.isArray(item.features) ? item.features : [];
   const thumbSource = introSource(item.intro_thumbnail_url) || DEFAULT_INTRO_THUMB;
+  const thumb2Source = introSource(item.intro2_thumbnail_url) || DEFAULT_INTRO_THUMB;
   const buttonText = selected ? 'Used' : owned ? 'Use' : 'Activate Package';
   const buttonIcon = selected ? 'checkmark-circle' : owned ? 'color-wand' : 'ribbon';
   const disabled = busy || selected;
@@ -145,7 +156,7 @@ function VipPackageCard({
       <LinearGradient colors={[`${accent}33`, 'rgba(13,16,50,.94)']} style={styles.packageTop}>
         <View style={styles.packageBadge}>
           <Ionicons name="diamond" size={13} color="#FFFFFF" />
-          <Text style={styles.packageBadgeText}>{item.duration_days || 30}d VIP</Text>
+          <Text style={styles.packageBadgeText}>{item.duration_days || 30}d SVIP</Text>
         </View>
         <Text style={styles.packageName} numberOfLines={1}>{item.name}</Text>
         <Text style={styles.packagePrice}>{formatNumber(item.price)} 💎</Text>
@@ -153,17 +164,41 @@ function VipPackageCard({
 
       <View style={styles.packageMediaRow}>
         <View style={styles.mediaBlock}>
-          <Text style={styles.mediaLabel}>Frame</Text>
+          <Text style={styles.mediaLabel}>Frame 1</Text>
           <AvatarPreview user={user} frameUrl={item.frame_url} />
-          <Text style={styles.mediaName} numberOfLines={1}>{item.frame_name || 'VIP Frame'}</Text>
+          <Text style={styles.mediaName} numberOfLines={1}>{item.frame_name || 'SVIP Frame'}</Text>
         </View>
-        <TouchableOpacity activeOpacity={0.86} style={styles.mediaBlock} onPress={() => onPreview(item)}>
-          <Text style={styles.mediaLabel}>Intro</Text>
+        <View style={styles.mediaBlock}>
+          <Text style={styles.mediaLabel}>Frame 2</Text>
+          <AvatarPreview user={user} frameUrl={item.frame2_url} />
+          <Text style={styles.mediaName} numberOfLines={1}>{item.frame2_name || 'SVIP Frame'}</Text>
+        </View>
+      </View>
+
+      <View style={styles.packageMediaRow}>
+        <TouchableOpacity
+          activeOpacity={0.86}
+          style={styles.mediaBlock}
+          onPress={() => onPreview({ videoUrl: item.intro_video_url })}
+        >
+          <Text style={styles.mediaLabel}>Intro 1</Text>
           <View style={styles.introThumbWrap}>
             <Image source={thumbSource} style={styles.introThumb} />
             <View style={styles.playButton}><Ionicons name="play" size={15} color="#FFFFFF" /></View>
           </View>
-          <Text style={styles.mediaName} numberOfLines={1}>{item.intro_name || 'VIP Intro'}</Text>
+          <Text style={styles.mediaName} numberOfLines={1}>{item.intro_name || 'SVIP Intro'}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          activeOpacity={0.86}
+          style={styles.mediaBlock}
+          onPress={() => onPreview({ videoUrl: item.intro2_video_url })}
+        >
+          <Text style={styles.mediaLabel}>Intro 2</Text>
+          <View style={styles.introThumbWrap}>
+            <Image source={thumb2Source} style={styles.introThumb} />
+            <View style={styles.playButton}><Ionicons name="play" size={15} color="#FFFFFF" /></View>
+          </View>
+          <Text style={styles.mediaName} numberOfLines={1}>{item.intro2_name || 'SVIP Intro'}</Text>
         </TouchableOpacity>
       </View>
 
@@ -196,29 +231,39 @@ function VipPackageCard({
   );
 }
 
-export default function VipScreen() {
+export default function SvipScreen() {
   const router = useRouter();
-  const { user, diamonds, refreshUser, vipSubscriptions } = useGlobalState();
+  const { user, diamonds, refreshUser, svipSubscriptions } = useGlobalState();
   const [busyId, setBusyId] = useState(null);
   const [previewPackage, setPreviewPackage] = useState(null);
-  const packages = vipSubscriptions?.length ? vipSubscriptions : FALLBACK_PACKAGES;
+  const packages = svipSubscriptions?.length ? svipSubscriptions : FALLBACK_PACKAGES;
 
   const isVipActive = user?.vipType && user?.vipExpiresAt && new Date(user.vipExpiresAt) > new Date();
 
   const getPackageState = (item) => {
-    const frameId = `vip:${item.id}:frame`;
-    const introId = `vip:${item.id}:intro`;
+    const frameId = `svip:${item.id}:frame:1`;
+    const frame2Id = `svip:${item.id}:frame:2`;
+    const introId = `svip:${item.id}:intro:1`;
+    const intro2Id = `svip:${item.id}:intro:2`;
     const owned = Boolean(
       user?.ownedProfileFrames?.includes(frameId)
+      || user?.ownedProfileFrames?.includes(frame2Id)
       || user?.ownedMallIntros?.includes(introId)
+      || user?.ownedMallIntros?.includes(intro2Id)
       || user?.selectedProfileFrame === frameId
-      || user?.selectedMallIntro === introId,
+      || user?.selectedProfileFrame === frame2Id
+      || user?.selectedMallIntro === introId
+      || user?.selectedMallIntro === intro2Id
     );
     const selected = Boolean(
       user?.selectedProfileFrame === frameId
+      || user?.selectedProfileFrame === frame2Id
       || user?.selectedMallIntro === introId
+      || user?.selectedMallIntro === intro2Id
       || (owned && user?.selectedProfileFrameUrl === item.frame_url)
+      || (owned && user?.selectedProfileFrameUrl === item.frame2_url)
       || (owned && user?.selectedMallIntroVideoUrl === item.intro_video_url)
+      || (owned && user?.selectedMallIntroVideoUrl === item.intro2_video_url)
     );
     return { owned, selected };
   };
@@ -226,14 +271,14 @@ export default function VipScreen() {
   const handlePurchase = async (item) => {
     if (busyId) return;
     const ok = await confirmCuteAlert(
-      'Activate VIP Package',
-      `${item.name} includes VIP for ${item.duration_days || 30} days, a VIP-only frame, and a VIP-only intro for ${formatNumber(item.price)} 💎.`,
+      'Activate SVIP Package',
+      `${item.name} includes SVIP for ${item.duration_days || 30} days, two SVIP-only frames, two SVIP-only intros, and SVIP name tag for ${formatNumber(item.price)} 💎.`,
       { confirmText: 'Activate', cancelText: 'Not now' },
     );
     if (!ok) return;
 
     setBusyId(item.id);
-    const { data, error } = await supabase.rpc('purchase_vip_subscription', {
+    const { data, error } = await supabase.rpc('purchase_svip_subscription', {
       p_subscription_id: item.id,
     });
     if (!error) {
@@ -247,8 +292,8 @@ export default function VipScreen() {
     }
 
     showCuteAlert(
-      'VIP Activated',
-      `${item.name} is active until ${formatDate(data?.expires_at)}. Your frame and intro are selected now.`,
+      'SVIP Activated',
+      `${item.name} is active until ${formatDate(data?.expires_at)}. Your SVIP tag, primary frame, and primary intro are selected now.`,
       [{ text: 'Nice' }],
     );
   };
@@ -256,7 +301,7 @@ export default function VipScreen() {
   const handleUse = async (item) => {
     if (busyId) return;
     setBusyId(item.id);
-    const { error } = await supabase.rpc('use_vip_subscription', {
+    const { error } = await supabase.rpc('use_svip_subscription', {
       p_subscription_id: item.id,
     });
     if (!error) {
@@ -269,7 +314,7 @@ export default function VipScreen() {
       return;
     }
 
-    showCuteAlert('Package selected', `${item.name} frame and intro are now active.`, [{ text: 'OK' }]);
+    showCuteAlert('Package selected', `${item.name} primary frame and intro are now active.`, [{ text: 'OK' }]);
   };
 
   return (
@@ -280,7 +325,7 @@ export default function VipScreen() {
           <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
             <Ionicons name="chevron-back" size={27} color="#FFFFFF" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>VIP Center</Text>
+          <Text style={styles.headerTitle}>SVIP Center</Text>
           <TouchableOpacity style={styles.walletBtn} onPress={() => router.push('/main/wallet')}>
             <Ionicons name="diamond" size={16} color="#8FE8FF" />
             <Text style={styles.walletText}>{formatNumber(diamonds)}</Text>
@@ -293,8 +338,8 @@ export default function VipScreen() {
               <Ionicons name="ribbon" size={31} color="#FFFFFF" />
             </LinearGradient>
             <View style={styles.heroCopy}>
-              <Text style={styles.heroTitle}>VIP Packages</Text>
-              <Text style={styles.heroSub}>Subscription, profile frame, and entrance intro in one package.</Text>
+              <Text style={styles.heroTitle}>SVIP Packages</Text>
+              <Text style={styles.heroSub}>SVIP tag, two frames, two intros, and premium room presence.</Text>
               {user?.vipType ? (
                 <View style={styles.statusChip}>
                   <Ionicons name={isVipActive ? 'checkmark-circle' : 'time'} size={13} color="#FFFFFF" />
@@ -311,7 +356,7 @@ export default function VipScreen() {
           {packages.map((item) => {
             const { owned, selected } = getPackageState(item);
             return (
-              <VipPackageCard
+              <SvipPackageCard
                 key={item.id}
                 item={item}
                 user={user}

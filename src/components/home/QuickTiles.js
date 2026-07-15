@@ -17,9 +17,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 
 const { width } = Dimensions.get('window');
-// 16px outer padding on each side + 10px gap between three tiles =
-// (width - 32 - 20) / 3.
-const TILE_W = Math.floor((width - 32 - 20) / 3);
+// 16px outer padding on each side + 10px gaps between four tiles.
+const TILE_W = Math.floor((width - 32 - 30) / 4);
 
 const TILES = [
   {
@@ -35,6 +34,13 @@ const TILES = [
     icon:   'star',
     colors: ['#FFD43A', '#FFA33A'],         // yellow → orange
     route:  '/main/vip',
+  },
+  {
+    key:    'svip',
+    label:  'SVIP',
+    icon:   'shield-checkmark',
+    colors: ['#FCD34D', '#F59E0B'],
+    route:  '/main/svip',
   },
   {
     key:    'network',
@@ -113,7 +119,7 @@ const styles = StyleSheet.create({
   },
   label: {
     color: '#FFFFFF',
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: '800',
     letterSpacing: 0.3,
   },

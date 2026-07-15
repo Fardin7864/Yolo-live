@@ -66,14 +66,14 @@ const TENANT_CONFIG = {
   // 3. BACKEND — Supabase + EAS
   // ============================================================
   supabase: {
-    url:     'https://pfuclgmmcpzvnzapktou.supabase.co',
-    anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBmdWNsZ21tY3B6dm56YXBrdG91Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc2NDUyMjgsImV4cCI6MjA5MzIyMTIyOH0.wNzz8_ZTw7m9_Qiikg9vM7mP7eh15YEjjsjJpYC3oz8',
+    url:     'https://wahnvplqftkqtvtpwztq.supabase.co',
+    anonKey: 'sb_publishable_AziPqXs0b4ZRSe0PQNVThg_WU4yfyL0',
   },
 
   // Google Sign-In uses the native Google account picker. The Web client ID
   // is required so Google returns an ID token that Supabase can verify.
   googleAuth: {
-    webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || '',
+    webClientId: '665156075474-r0lhhsfsrb5pi7h8cdtflc5snef3892e.apps.googleusercontent.com',
     iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || '',
   },
 

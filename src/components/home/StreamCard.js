@@ -5,6 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { BRAND } from '../../theme/brand';
 import { flagFor } from '../../utils/countryFlag';
+import SvipNameTag from '../SvipNameTag';
 
 const { width } = Dimensions.get('window');
 const CARD_WIDTH = (width - 48) / 2; // 2-col grid with 16px outer + 16px gutter
@@ -78,6 +79,7 @@ const StreamCard = ({ stream, siblings, myIdx, isCelebrity = false }) => {
         <Text style={styles.hostName} numberOfLines={1}>
           ☆{stream.broadcasterName}
         </Text>
+        <SvipNameTag vipType={stream.vipType} compact />
       </View>
     </TouchableOpacity>
   );

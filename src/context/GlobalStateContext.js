@@ -39,12 +39,43 @@ export const GlobalStateProvider = ({ children }) => {
     teen_patti:     { is_active: true, win_chance_percent: 50 },
     fruit_roulette: { is_active: true, win_chance_percent: 50 },
     greedy_lion:    { is_active: true, win_chance_percent: 60 },
+    tin_patti_pro:  { is_active: true, win_chance_percent: 60 },
   });
 
   // ============================================================
   // PROFILE FETCH
   // ============================================================
-  const fetchProfile = async (userId, attempt = 0) => {
+  const fallbackUserFromAuth = (authUser) => {
+    const meta = authUser?.user_metadata || {};
+    const name = meta.full_name || meta.name || authUser?.email?.split('@')[0] || 'User';
+    return {
+      name,
+      avatar: meta.avatar_url || meta.picture || `https://api.dicebear.com/7.x/avataaars/svg?seed=${authUser?.id}`,
+      level: 1,
+      lifetimeDiamondsSpent: 0,
+      id: authUser?.id,
+      displayId: null,
+      phone: authUser?.phone || null,
+      bio: '',
+      gender: 'female',
+      country: null,
+      vipType: null,
+      vipExpiresAt: null,
+      isBanned: false,
+      agencyId: null,
+      selectedProfileFrame: null,
+      selectedProfileFrameUrl: null,
+      ownedProfileFrames: [],
+      selectedMallIntro: null,
+      selectedMallIntroVideoUrl: null,
+      selectedMallIntroThumbnailUrl: null,
+      ownedMallIntros: [],
+      pushNotificationsEnabled: true,
+      dmNotificationsEnabled: true,
+    };
+  };
+
+  const fetchProfile = async (userId, attempt = 0, authUser = null) => {
     try {
       const { data, error } = await supabase
         .from('profiles')
@@ -56,20 +87,22 @@ export const GlobalStateProvider = ({ children }) => {
 
       if (!data) {
         if (attempt === 0) {
+          try {
+            await supabase.rpc('ensure_my_profile');
+          } catch (_) {}
           await new Promise((resolve) => setTimeout(resolve, 350));
-          return fetchProfile(userId, 1);
+          return fetchProfile(userId, 1, authUser);
         }
 
-        console.warn('Profile not found for current auth user; signing out stale session.');
-        try { await supabase.auth.signOut(); } catch (_) {}
-        setUser(null);
+        console.warn('Profile not found for current auth user; keeping session with temporary profile.');
+        const fallback = fallbackUserFromAuth(authUser || { id: userId });
+        setUser(fallback);
         setDiamonds(0);
         setBeans(0);
         setRole('user');
         setOwnedAgency(null);
         setMyAgency(null);
         setMyReseller(null);
-        try { router.replace('/auth/login'); } catch (_) {}
         return;
       }
 
@@ -236,6 +269,8 @@ export const GlobalStateProvider = ({ children }) => {
   // ============================================================
   const [gifts, setGifts]             = useState([]);
   const [vipTiers, setVipTiers]       = useState([]);
+  const [vipSubscriptions, setVipSubscriptions] = useState([]);
+  const [svipSubscriptions, setSvipSubscriptions] = useState([]);
   const [tasks, setTasks]             = useState([]);
   const [homeBanners, setHomeBanners] = useState([]);
   const [badges, setBadges]           = useState([]);
@@ -267,6 +302,28 @@ export const GlobalStateProvider = ({ children }) => {
       .order('display_order', { ascending: true });
     if (error) return;
     setVipTiers(data || []);
+  }, []);
+
+  const loadVipSubscriptions = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('vip_subscriptions')
+      .select('id, name, price, duration_days, features, intro_name, intro_thumbnail_url, intro_video_url, frame_name, frame_url, accent_color, is_active, display_order')
+      .eq('is_active', true)
+      .order('display_order', { ascending: true })
+      .order('created_at', { ascending: true });
+    if (error) return;
+    setVipSubscriptions(data || []);
+  }, []);
+
+  const loadSvipSubscriptions = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('svip_subscriptions')
+      .select('id, name, price, duration_days, features, intro_name, intro_thumbnail_url, intro_video_url, intro2_name, intro2_thumbnail_url, intro2_video_url, frame_name, frame_url, frame2_name, frame2_url, accent_color, is_active, display_order')
+      .eq('is_active', true)
+      .order('display_order', { ascending: true })
+      .order('created_at', { ascending: true });
+    if (error) return;
+    setSvipSubscriptions(data || []);
   }, []);
 
   const loadTasks = useCallback(async () => {
@@ -401,7 +458,7 @@ export const GlobalStateProvider = ({ children }) => {
   }, []);
 
   useEffect(() => {
-    loadGifts(); loadVipTiers(); loadTasks(); loadBadges(); loadLevelTiers();
+    loadGifts(); loadVipTiers(); loadVipSubscriptions(); loadSvipSubscriptions(); loadTasks(); loadBadges(); loadLevelTiers();
     loadDailyLoginRewards(); loadDailyLoginClaims(); loadTodayProgress();
     loadHomeBanners();
     loadAudioTemplates(); loadMyOwnedTemplates();
@@ -409,6 +466,8 @@ export const GlobalStateProvider = ({ children }) => {
       .channel(`catalogs-${Date.now()}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'gifts'              }, () => loadGifts())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'vip_tiers'          }, () => loadVipTiers())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'vip_subscriptions'  }, () => loadVipSubscriptions())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'svip_subscriptions' }, () => loadSvipSubscriptions())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks'              }, () => loadTasks())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'badges'             }, () => loadBadges())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'level_tiers'        }, () => loadLevelTiers())
@@ -419,7 +478,7 @@ export const GlobalStateProvider = ({ children }) => {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'user_audio_templates'}, () => loadMyOwnedTemplates())
       .subscribe();
     return () => { try { supabase.removeChannel(ch); } catch (_) {} };
-  }, [loadGifts, loadVipTiers, loadTasks, loadBadges, loadLevelTiers, loadDailyLoginRewards, loadDailyLoginClaims, loadTodayProgress, loadHomeBanners, loadAudioTemplates, loadMyOwnedTemplates]);
+  }, [loadGifts, loadVipTiers, loadVipSubscriptions, loadSvipSubscriptions, loadTasks, loadBadges, loadLevelTiers, loadDailyLoginRewards, loadDailyLoginClaims, loadTodayProgress, loadHomeBanners, loadAudioTemplates, loadMyOwnedTemplates]);
 
   // ============================================================
   // FOLLOW SYSTEM (works app-wide — live rooms, profiles, search)
@@ -479,7 +538,7 @@ export const GlobalStateProvider = ({ children }) => {
           setLoading(false);
           return;
         }
-        fetchProfile(session.user.id);
+        fetchProfile(session.user.id, 0, session.user);
       })
       .catch((err) => {
         if (cancelled) return;
@@ -495,7 +554,7 @@ export const GlobalStateProvider = ({ children }) => {
           supabase.auth.signOut().catch(() => {});
         }
         if (session) {
-          fetchProfile(session.user.id);
+          fetchProfile(session.user.id, 0, session.user);
         } else {
           setUser(null);
           setDiamonds(0);
@@ -1240,6 +1299,8 @@ export const GlobalStateProvider = ({ children }) => {
     // Admin-managed catalogs (DB-driven, realtime)
     gifts,
     vipTiers,
+    vipSubscriptions,
+    svipSubscriptions,
     tasks,
     badges,
     levelTiers,

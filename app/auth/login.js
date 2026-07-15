@@ -17,6 +17,16 @@ GoogleSignin.configure({
   offlineAccess: false,
 });
 
+const GOOGLE_ANDROID_SHA1S = [
+  '5E:8F:16:06:2E:A3:CD:2C:4A:0D:54:78:76:BA:A6:F3:8C:AB:F6:25',
+  'A8:41:C4:BA:89:0C:97:25:6E:24:CF:1E:85:F0:9F:9F:C0:CB:89:06',
+];
+
+function getGoogleIdToken(response) {
+  if (response?.type && response.type !== 'success') return null;
+  return response?.data?.idToken || response?.idToken || null;
+}
+
 function GoogleLogo() {
   return (
     <Svg width={28} height={28} viewBox="0 0 48 48" accessibilityLabel="Google">
@@ -64,9 +74,8 @@ const LoginScreen = () => {
     try {
       await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
       const response = await GoogleSignin.signIn();
-      if (response.type !== 'success') return;
 
-      const idToken = response.data?.idToken;
+      const idToken = getGoogleIdToken(response);
       if (!idToken) throw new Error('Google did not return an ID token.');
 
       const { error } = await supabase.auth.signInWithIdToken({
@@ -75,10 +84,28 @@ const LoginScreen = () => {
       });
       if (error) throw error;
 
-      await logAnalyticsEvent('login', { method: 'google' });
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData?.session) {
+        throw new Error('Google login completed, but the app could not save the session.');
+      }
+      if (typeof supabase.rpc === 'function') {
+        try {
+          await supabase.rpc('ensure_my_profile');
+        } catch (_) {}
+      }
+
+      await logAnalyticsEvent('login', { method: 'google' }).catch(() => {});
       router.replace('/main/(tabs)');
     } catch (error) {
       const message = error?.message || 'Google sign-in could not complete.';
+      if (String(message).includes('DEVELOPER_ERROR')) {
+        Alert.alert(
+          'Google sign-in setup needed',
+          `Android Google Sign-In is not authorized for this build yet.\n\nRegister these SHA-1 fingerprints for package com.carelive.app in Firebase / Google Cloud, then rebuild:\n${GOOGLE_ANDROID_SHA1S.join('\n')}`
+        );
+        return;
+      }
+
       Alert.alert('Google sign-in failed', message);
     } finally {
       setLoading(false);

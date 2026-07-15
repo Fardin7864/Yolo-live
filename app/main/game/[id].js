@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import GreedyLion from '../../../src/components/games/GreedyLion';
+import TinPattiPro from '../../../src/components/games/TinPattiPro';
 import { useGlobalState } from '../../../src/context/GlobalStateContext';
 
 const APP_BACKGROUND = require('../../../assets/backgrounds/neon-space.webp');
@@ -41,6 +42,11 @@ const GAME_META = {
     title: 'Greedy Lion',
     color: '#F5C76A',
     icon: 'trophy',
+  },
+  tin_patti_pro: {
+    title: 'Tin Patti Pro',
+    color: '#F5C76A',
+    icon: 'albums',
   },
 };
 
@@ -167,6 +173,8 @@ export default function HomeGameScreen() {
         <StatusBar style="light" />
         {normalizedGameId === 'greedy_lion' ? (
           <GreedyLion {...controls} />
+        ) : normalizedGameId === 'tin_patti_pro' ? (
+          <TinPattiPro {...controls} />
         ) : (
           <StandaloneGame meta={meta} diamonds={diamonds} setDiamonds={setDiamonds} onBack={() => router.back()} />
         )}

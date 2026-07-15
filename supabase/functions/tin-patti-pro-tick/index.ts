@@ -1,12 +1,12 @@
 // =====================================================================
-// Greedy Lion Tick — keeps the global board running on Supabase cron.
+// Tin Patti Pro Tick — keeps the global board running on Supabase cron.
 //
 // Secrets required:
 //   SUPABASE_URL
 //   SUPABASE_SERVICE_ROLE_KEY
 //
 // Deploy:
-//   supabase functions deploy greedy-lion-tick
+//   supabase functions deploy tin-patti-pro-tick
 //
 // Schedule in Supabase:
 //   every 10 seconds if available, otherwise every minute. The function
@@ -37,7 +37,7 @@ Deno.serve(async (req) => {
       auth: { persistSession: false },
     });
 
-    const { data, error } = await supabase.rpc('greedy_lion_tick');
+    const { data, error } = await supabase.rpc('tin_patti_pro_tick');
     if (error) {
       return json({ success: false, error: error.message }, 500);
     }

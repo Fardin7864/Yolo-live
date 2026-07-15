@@ -11,6 +11,7 @@ import { useRouter } from 'expo-router';
 import LogoLoader from '../../../src/components/LogoLoader';
 import { useGlobalState } from '../../../src/context/GlobalStateContext';
 import { supabase } from '../../../src/api/supabase';
+import SvipNameTag from '../../../src/components/SvipNameTag';
 
 const LOCAL_HERO = require('../../../assets/onboarding/welcome-loading.webp');
 const LOCAL_AVATAR = require('../../../assets/splash-icon.png');
@@ -55,7 +56,7 @@ const QUICK_ACTIONS = [
   { key: 'tasks', title: 'Tasks', subtitle: 'Complete & earn', meta: '🪙 120', colors: ['#5C1BC6', '#B914D1', '#F00CB8'], glow: '#FF55E6', route: '/main/tasks' },
   { key: 'vip', title: 'VIP', subtitle: 'Exclusive perks', meta: 'VIP 3', colors: ['#7C283E', '#B55527', '#E18A19'], glow: '#FFB53D', route: '/main/vip' },
   { key: 'network', title: 'Network', subtitle: 'Grow your circle', meta: '+ New people', colors: ['#1645A8', '#0079AE', '#00A7A4'], glow: '#35E7FF', route: '/main/network' },
-  { key: 'svip', title: 'SVIP', subtitle: 'Super privileges', meta: 'SVIP', colors: ['#4D1D95', '#8B2AE6', '#D97706'], glow: '#FCD34D', route: '/main/vip' },
+  { key: 'svip', title: 'SVIP', subtitle: 'Super privileges', meta: 'SVIP', colors: ['#4D1D95', '#8B2AE6', '#D97706'], glow: '#FCD34D', route: '/main/svip' },
 ];
 
 const GAME_ITEMS = [
@@ -86,6 +87,15 @@ const GAME_ITEMS = [
     colors: ['#F59E0B', '#B91C9B', '#11115F'],
     chip: 'Native',
   },
+  {
+    key: 'tin_patti_pro',
+    title: 'Tin Patti Pro',
+    subtitle: 'One shared pro card table.',
+    icon: 'albums',
+    emoji: 'TP',
+    colors: ['#F59E0B', '#0F8A5F', '#5C1BC6'],
+    chip: 'Global',
+  },
 ];
 
 const PAGE_SIZE = 10;
@@ -104,9 +114,12 @@ function SafeImage({ uri, style, fallback = LOCAL_AVATAR }) {
 }
 
 function HomeHeader({ user, unreadCount, onProfile, onSearch, onNotifications }) {
+  const bundledFrameKey = user?.selectedProfileFrameUrl?.startsWith?.('bundled://')
+    ? user.selectedProfileFrameUrl.replace('bundled://', '')
+    : null;
   const purchasedFrame = user?.selectedProfileFrameUrl && !user.selectedProfileFrameUrl.startsWith('bundled://')
     ? { uri: user.selectedProfileFrameUrl }
-    : HOME_PROFILE_FRAMES[user?.selectedProfileFrame];
+    : HOME_PROFILE_FRAMES[bundledFrameKey || user?.selectedProfileFrame];
 
   return (
     <View style={styles.header}>
@@ -282,6 +295,7 @@ function LiveStreamCard({ stream, onPress, style }) {
         <View style={styles.hostLine}>
           <SafeImage uri={stream.broadcasterAvatar} style={styles.miniAvatar} />
           <Text style={styles.hostName} numberOfLines={1}>{stream.broadcasterName}</Text>
+          <SvipNameTag vipType={stream.vipType} compact />
           <Ionicons name="checkmark-circle" size={12} color="#8A63FF" />
         </View>
         <View style={styles.tagPill}><Text style={styles.tagText}>{stream.tags?.[0] || 'Live'}</Text></View>
@@ -459,7 +473,7 @@ export default function PremiumHomeScreen() {
     try { await supabase.rpc('cleanup_stale_live_streams'); } catch (_) {}
     const pageOffset = reset ? 0 : offset;
     let query = supabase.from('live_streams')
-      .select('id, broadcaster_id, type, title, tag, cover_url, current_viewers, peak_viewers, total_gifts, last_heartbeat_at, profiles:broadcaster_id(full_name, avatar_url, is_banned, country)')
+      .select('id, broadcaster_id, type, title, tag, cover_url, current_viewers, peak_viewers, total_gifts, last_heartbeat_at, profiles:broadcaster_id(full_name, avatar_url, is_banned, country, vip_type)')
       .eq('status', 'live')
       .gt('last_heartbeat_at', new Date(Date.now() - 90_000).toISOString())
       .order('current_viewers', { ascending: false })
@@ -477,6 +491,7 @@ export default function PremiumHomeScreen() {
       title: item.title,
       broadcasterName: item.profiles?.full_name || 'Streamer',
       broadcasterAvatar: item.profiles?.avatar_url,
+      vipType: item.profiles?.vip_type || null,
       viewerCount: item.current_viewers ?? item.peak_viewers ?? 0,
       coverUrl: item.cover_url || item.profiles?.avatar_url,
       tags: [item.tag, item.type === 'audio' ? 'Audio' : 'Live'].filter(Boolean),

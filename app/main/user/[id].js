@@ -17,6 +17,7 @@ import LogoLoader from '../../../src/components/LogoLoader';
 import { useGlobalState } from '../../../src/context/GlobalStateContext';
 import { supabase } from '../../../src/api/supabase';
 import { flagFor } from '../../../src/utils/countryFlag';
+import SvipNameTag from '../../../src/components/SvipNameTag';
 
 const PROFILE_ASSETS = {
   background: require('../../../assets/public-profile/cosmic-background.webp'),
@@ -175,6 +176,7 @@ export default function PublicProfileScreen() {
 
             <View style={styles.nameRow}>
               <Text style={styles.userName}>♠ {profile.full_name || 'User'} ♠</Text>
+              <SvipNameTag vipType={profile.vip_type} />
               <LinearGradient colors={['#ffd95b', '#ffb817']} style={styles.levelBadge}>
                 <Text style={styles.levelText}>Lv. {profile.level || 1}</Text>
               </LinearGradient>

@@ -10,6 +10,7 @@ import { useRouter } from 'expo-router';
 import { useGlobalState } from '../../../src/context/GlobalStateContext';
 import { supabase } from '../../../src/api/supabase';
 import { useResponsive } from '../../../src/hooks/useResponsive';
+import SvipNameTag from '../../../src/components/SvipNameTag';
 
 const PROFILE_ASSETS = {
   background: require('../../../assets/profile/background.webp'),
@@ -126,9 +127,12 @@ export default function ProfileScreen() {
   };
   const visitors = user.visitorCount ?? user.visitors ?? 0;
   const resellerActive = !!myReseller?.id;
+  const bundledFrameKey = user.selectedProfileFrameUrl?.startsWith?.('bundled://')
+    ? user.selectedProfileFrameUrl.replace('bundled://', '')
+    : null;
   const activeAvatarFrame = user.selectedProfileFrameUrl && !user.selectedProfileFrameUrl.startsWith('bundled://')
     ? { uri: user.selectedProfileFrameUrl }
-    : PURCHASED_PROFILE_FRAMES[user.selectedProfileFrame] || PROFILE_ASSETS.avatarFrame;
+    : PURCHASED_PROFILE_FRAMES[bundledFrameKey || user.selectedProfileFrame] || PROFILE_ASSETS.avatarFrame;
 
   const stats = [
     { label: 'Visitors', value: formatNumber(visitors), icon: PROFILE_ASSETS.visitors, route: '/main/network' },
@@ -175,6 +179,7 @@ export default function ProfileScreen() {
               <View style={styles.identity}>
                 <View style={styles.nameRow}>
                   <Text style={styles.userName} numberOfLines={1}>{user.name || 'Yolo User'}</Text>
+                  <SvipNameTag vipType={user.vipType} compact />
                   <Image source={PROFILE_ASSETS.verified} style={styles.verified} />
                 </View>
                 <View style={styles.badgeRow}>
