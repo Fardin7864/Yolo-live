@@ -1,172 +1,154 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useGlobalState } from '../../src/context/GlobalStateContext';
-import { horizontalScale } from '../../src/theme/scaling';
+import { supabase } from '../../src/api/supabase';
+import { WEALTH_LEVEL_THRESHOLDS, getWealthProgress, wealthVisualForLevel } from '../../src/utils/wealthLevels';
 
-// Fallback tier ranges used while level_tiers hydrates. Same shape as
-// the admin-managed catalogue: id, name, color, icon, min/max level.
-const TIERS_FALLBACK = [
-  { id: 'bronze',   name: 'Bronze',         color: '#CD7F32', icon: 'star-outline',       min_level: 1,   max_level: 19  },
-  { id: 'silver',   name: 'Silver',         color: '#9CA3AF', icon: 'star-half-outline',  min_level: 20,  max_level: 39  },
-  { id: 'gold',     name: 'Gold',           color: '#FBBF24', icon: 'star',               min_level: 40,  max_level: 59  },
-  { id: 'platinum', name: 'Platinum',       color: '#60A5FA', icon: 'diamond-outline',    min_level: 60,  max_level: 79  },
-  { id: 'diamond',  name: 'Diamond',        color: '#00E5FF', icon: 'diamond',            min_level: 80,  max_level: 99  },
-  { id: 'supreme',  name: 'Supreme Legend', color: '#D946EF', icon: 'flame',              min_level: 100, max_level: 100 },
-];
+const formatCost = (value) => Number(value || 0).toLocaleString('en-US');
 
-// Map a level number to its tier using the admin-managed `level_tiers`
-// rows. Renders the same data the old hardcoded ladder did.
-const buildLevelsData = (tiers) => Array.from({ length: 100 }, (_, i) => {
-  const lvl = i + 1;
-  // Prefer an exact range match; fall back to the lowest tier so a
-  // misconfigured catalogue still renders something readable.
-  const tier =
-    tiers.find((t) => lvl >= t.min_level && lvl <= t.max_level) ||
-    tiers[0] ||
-    TIERS_FALLBACK[0];
-  return { lvl, title: tier.name, color: tier.color, icon: tier.icon };
-});
+function LevelBadge({ level, active = false }) {
+  const visual = wealthVisualForLevel(level);
+  return (
+    <LinearGradient
+      colors={[visual.color, visual.dark]}
+      start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+      style={[styles.levelBadge, active && styles.levelBadgeActive]}
+    >
+      <Ionicons name={visual.icon} size={14} color="#FFF7B2" />
+      <Text style={styles.levelBadgeText}>{level}</Text>
+    </LinearGradient>
+  );
+}
 
 export default function LevelScreen() {
   const router = useRouter();
-  const { user, levelTiers, systemSettings } = useGlobalState();
+  const { user } = useGlobalState();
+  const [thresholds, setThresholds] = useState(WEALTH_LEVEL_THRESHOLDS);
 
-  // Live tier ladder. Memoised so a stable scroll list survives renders.
-  const levelsData = React.useMemo(() => {
-    const tiers = Array.isArray(levelTiers) && levelTiers.length > 0
-      ? [...levelTiers].sort((a, b) => (a.min_level || 0) - (b.min_level || 0))
-      : TIERS_FALLBACK;
-    return buildLevelsData(tiers);
-  }, [levelTiers]);
+  useEffect(() => {
+    let mounted = true;
+    const load = async () => {
+      const { data } = await supabase.from('level_thresholds').select('level,min_exp').order('level');
+      if (mounted && Array.isArray(data) && data.length >= 110) setThresholds(data.slice(0, 110));
+    };
+    load();
+    const channel = supabase.channel(`wealth-levels-${Date.now()}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'level_thresholds' }, load)
+      .subscribe();
+    return () => { mounted = false; supabase.removeChannel(channel); };
+  }, []);
 
-  // Admin-tunable EXP cost per level (system_settings.level_exp_multiplier).
-  const expMultiplier = Number(systemSettings?.level_exp_multiplier) || 1500;
-
-  // Total EXP = lifetime diamonds the user has spent on gifts. Maintained
-  // by trigger trg_gift_exp (migration 50) so this is always authoritative.
-  const userExp = Math.max(0, Number(user?.lifetimeDiamondsSpent) || 0);
-
-  // Level = FLOOR(exp / multiplier) + 1, capped at 100. Mirrors the
-  // recalc_user_level RPC so the screen agrees with the server even
-  // before the realtime UPDATE lands.
-  const derivedLevel = Math.max(1, Math.min(100, Math.floor(userExp / expMultiplier) + 1));
-  const currentLvl = Math.max(derivedLevel, Math.max(1, Math.min(100, user?.level || 1)));
-  const userCurrentLevelObj = levelsData.find(l => l.lvl === currentLvl);
-  const nextLvl = Math.min(100, currentLvl + 1);
-
-  // Each level spans `multiplier` EXP. Progress within the current level
-  // is exp minus the floor of that band; bar fills as the user gifts more.
-  const expCurrent  = (currentLvl - 1) * expMultiplier;
-  const expNext     = currentLvl * expMultiplier;
-  const progressPct = currentLvl >= 100
-    ? 100
-    : Math.max(0, Math.min(100, Math.round(((userExp - expCurrent) / Math.max(1, expNext - expCurrent)) * 100)));
-  const expRemaining = currentLvl >= 100 ? 0 : Math.max(0, expNext - userExp);
+  const giftedDiamonds = Math.max(0, Number(user?.lifetimeDiamondsSpent) || 0);
+  const wealth = useMemo(() => getWealthProgress(giftedDiamonds, thresholds), [giftedDiamonds, thresholds]);
+  const { level: currentLevel, progress, remaining } = wealth;
+  const next = wealth.nextLevel;
+  const currentVisual = wealthVisualForLevel(currentLevel);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
-          <Ionicons name="chevron-back" size={28} color="#FFFFFF" />
+        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+          <Ionicons name="chevron-back" size={27} color="#FFFFFF" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>My Level</Text>
-        <View style={{ width: horizontalScale(28) }} />
+        <View style={styles.headerSpacer} />
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
-        
-        {/* User Current Level Highlight */}
-        <LinearGradient colors={['#2D1B36', '#1E1A34']} style={styles.heroCard}>
-          <Text style={styles.heroSubTitle}>YOUR CURRENT LEVEL</Text>
-          <View style={styles.lvlCircle}>
-            <Text style={styles.lvlCircleText}>Lv.{currentLvl}</Text>
+        <LinearGradient colors={['#261064', '#100735', '#080523']} style={styles.hero}>
+          <View style={styles.wealthTitleRow}>
+            <Ionicons name="trophy" size={24} color="#FFD83D" />
+            <Text style={styles.wealthTitle}>WEALTH LEVEL</Text>
+            <Ionicons name="trophy" size={24} color="#FFD83D" />
           </View>
-          <Text style={[styles.lvlRankText, {color: userCurrentLevelObj?.color}]}>
-            {userCurrentLevelObj?.title} Rank
-          </Text>
+          <View style={styles.ribbon}><Text style={styles.ribbonText}>GIFT COIN COST TABLE</Text></View>
+          <LevelBadge level={currentLevel} active />
+          <Text style={[styles.rankName, { color: currentVisual.color }]}>{currentVisual.name} Level</Text>
+          <Text style={styles.giftedLabel}>Total gifted diamonds</Text>
+          <Text style={styles.giftedValue}>{formatCost(giftedDiamonds)}</Text>
 
-          {/* Progress Bar */}
-          <View style={styles.progressContainer}>
+          <View style={styles.progressBox}>
             <View style={styles.progressHeader}>
-              <Text style={styles.expText}>EXP: {userExp.toLocaleString()} / {expNext.toLocaleString()}</Text>
-              <Text style={styles.expText}>Lv.{nextLvl}</Text>
+              <Text style={styles.progressText}>Lv.{currentLevel}</Text>
+              <Text style={styles.progressText}>{next ? `Lv.${next}` : 'MAX'}</Text>
             </View>
-            <View style={styles.trackBar}>
-              <View style={[styles.fillBar, { width: `${progressPct}%` }]} />
-            </View>
-            <Text style={styles.helperText}>
-              {currentLvl >= 100
-                ? 'You have reached the highest level!'
-                : <>Earn <Text style={{color: '#00E5FF', fontWeight: 'bold'}}>{expRemaining.toLocaleString()} more EXP</Text> to reach the next level!</>}
+            <View style={styles.track}><LinearGradient colors={[currentVisual.color, '#FFE24B']} style={[styles.fill, { width: `${progress}%` }]} /></View>
+            <Text style={styles.progressHelp}>
+              {next ? `Send gifts worth ${formatCost(remaining)} more diamonds to level up` : 'Highest wealth level achieved'}
             </Text>
           </View>
+          <Text style={styles.ruleText}>Only diamonds spent sending gifts to another user increase your level.</Text>
         </LinearGradient>
 
-        <Text style={styles.sectionTitle}>Level Tier List (1-100)</Text>
-
-        {/* Level List 1-100 */}
-        <View style={styles.listContainer}>
-          {levelsData.map((item) => (
-            <View 
-              key={item.lvl} 
-              style={[
-                styles.listItem, 
-                item.lvl === currentLvl && styles.listItemActive
-              ]}
-            >
-              <View style={styles.listItemLeft}>
-                <View style={[styles.badgeIcon, {backgroundColor: item.color}]}>
-                  <Ionicons name={item.icon} size={16} color="#111827" />
+        <View style={styles.table}>
+          <View style={styles.tableHeader}>
+            <Text style={[styles.tableHeaderText, styles.levelColumn]}>LEVEL</Text>
+            <Text style={[styles.tableHeaderText, styles.costColumn]}>UPGRADE GIFT COIN COST</Text>
+          </View>
+          {thresholds.map((row) => {
+            const level = Number(row.level);
+            const active = level === currentLevel;
+            const reached = level < currentLevel;
+            return (
+              <View key={level} style={[styles.tableRow, active && styles.activeRow]}>
+                <View style={styles.levelColumn}><LevelBadge level={level} active={active} /></View>
+                <View style={styles.costColumn}>
+                  <Text style={[styles.costText, active && styles.activeCost]}>{formatCost(row.min_exp)}</Text>
+                  {active ? <Text style={styles.youText}>CURRENT</Text> : reached ? <Ionicons name="checkmark-circle" size={17} color="#55DB8A" /> : null}
                 </View>
-                <Text style={styles.lvlNumber}>Level {item.lvl}</Text>
-                {item.lvl === currentLvl && (
-                  <View style={styles.youIndicator}><Text style={styles.youText}>YOU</Text></View>
-                )}
               </View>
-              <Text style={[styles.rankBadge, {color: item.color, borderColor: item.color}]}>
-                {item.title}
-              </Text>
-            </View>
-          ))}
+            );
+          })}
         </View>
-
+        <View style={styles.footerTip}>
+          <Ionicons name="sparkles" size={15} color="#FFD83D" />
+          <Text style={styles.footerText}>Keep gifting to unlock more status and amazing rewards!</Text>
+          <Ionicons name="sparkles" size={15} color="#FFD83D" />
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0E111E' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#251B45' },
-  backBtn: { padding: 4 },
-  headerTitle: { color: '#FFFFFF', fontSize: 18, fontWeight: 'bold' },
-  content: { padding: 16 },
-  
-  heroCard: { borderRadius: 20, padding: 24, alignItems: 'center', marginBottom: 24, borderWidth: 1, borderColor: '#374151' },
-  heroSubTitle: { color: '#9CA3AF', fontSize: 12, fontWeight: 'bold', letterSpacing: 2, marginBottom: 16 },
-  lvlCircle: { width: 100, height: 100, borderRadius: 50, backgroundColor: 'rgba(251, 191, 36, 0.1)', borderWidth: 3, borderColor: '#FBBF24', justifyContent: 'center', alignItems: 'center', marginBottom: 12 },
-  lvlCircleText: { color: '#FBBF24', fontSize: 24, fontWeight: '900', fontStyle: 'italic' },
-  lvlRankText: { fontSize: 18, fontWeight: 'bold', marginBottom: 24 },
-  
-  progressContainer: { width: '100%', backgroundColor: 'rgba(0,0,0,0.3)', padding: 16, borderRadius: 16 },
-  progressHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
-  expText: { color: '#E5E7EB', fontSize: 12, fontWeight: 'bold' },
-  trackBar: { width: '100%', height: 8, backgroundColor: '#374151', borderRadius: 4, marginBottom: 12, overflow: 'hidden' },
-  fillBar: { height: '100%', backgroundColor: '#FBBF24', borderRadius: 4 },
-  helperText: { color: '#9CA3AF', fontSize: 12, textAlign: 'center' },
-  
-  sectionTitle: { color: '#FFFFFF', fontSize: 18, fontWeight: 'bold', marginBottom: 16 },
-  listContainer: { backgroundColor: '#1E1A34', borderRadius: 20, overflow: 'hidden', padding: 8 },
-  listItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 16, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: '#251B45' },
-  listItemActive: { backgroundColor: 'rgba(251, 191, 36, 0.1)', borderRadius: 12, borderBottomWidth: 0 },
-  listItemLeft: { flexDirection: 'row', alignItems: 'center' },
-  badgeIcon: { width: 28, height: 28, borderRadius: 14, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  lvlNumber: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
-  rankBadge: { fontSize: 12, fontWeight: 'bold', borderWidth: 1, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 },
-  youIndicator: { backgroundColor: '#E11D48', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, marginLeft: 8 },
-  youText: { color: '#FFFFFF', fontSize: 10, fontWeight: 'bold' },
+  container: { flex: 1, backgroundColor: '#05031B' },
+  header: { height: 55, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: '#33226E' },
+  backButton: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center' },
+  headerTitle: { color: '#FFFFFF', fontSize: 18, fontWeight: '900' },
+  headerSpacer: { width: 38 },
+  content: { padding: 12, paddingBottom: 42 },
+  hero: { borderRadius: 20, padding: 18, alignItems: 'center', borderWidth: 1, borderColor: '#6043B2', shadowColor: '#8A45FF', shadowOpacity: .45, shadowRadius: 15, elevation: 8 },
+  wealthTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  wealthTitle: { color: '#FFD83D', fontSize: 25, fontWeight: '900', textShadowColor: '#B46900', textShadowRadius: 7, letterSpacing: .5 },
+  ribbon: { marginTop: 5, marginBottom: 15, backgroundColor: '#50169A', paddingHorizontal: 22, paddingVertical: 5, borderRadius: 4 },
+  ribbonText: { color: '#FFFFFF', fontSize: 12, fontWeight: '900', letterSpacing: 1.1 },
+  levelBadge: { minWidth: 58, height: 30, borderRadius: 15, paddingHorizontal: 9, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, borderWidth: 1, borderColor: 'rgba(255,255,255,.35)' },
+  levelBadgeActive: { borderColor: '#FFF19B', shadowColor: '#FFD83D', shadowOpacity: .9, shadowRadius: 8, elevation: 7 },
+  levelBadgeText: { color: '#FFFFFF', fontSize: 14, fontWeight: '900', textShadowColor: '#000', textShadowRadius: 2 },
+  rankName: { fontSize: 17, fontWeight: '900', marginTop: 7 },
+  giftedLabel: { color: '#AFA8D1', fontSize: 11, marginTop: 10 },
+  giftedValue: { color: '#FFFFFF', fontSize: 21, fontWeight: '900', marginTop: 2 },
+  progressBox: { width: '100%', marginTop: 14, borderRadius: 13, padding: 12, backgroundColor: 'rgba(0,0,0,.32)' },
+  progressHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
+  progressText: { color: '#EAE7FF', fontSize: 11, fontWeight: '900' },
+  track: { height: 9, borderRadius: 5, backgroundColor: '#302751', overflow: 'hidden' },
+  fill: { height: '100%', borderRadius: 5 },
+  progressHelp: { color: '#D2CDEA', fontSize: 11, textAlign: 'center', marginTop: 9 },
+  ruleText: { color: '#F6D56B', fontSize: 10.5, lineHeight: 15, textAlign: 'center', marginTop: 12, maxWidth: 280 },
+  table: { marginTop: 17, borderRadius: 14, overflow: 'hidden', borderWidth: 1, borderColor: '#51418D', backgroundColor: '#0A0B2D' },
+  tableHeader: { minHeight: 46, flexDirection: 'row', alignItems: 'center', backgroundColor: '#241052', borderBottomWidth: 1, borderBottomColor: '#6655A1' },
+  tableHeaderText: { color: '#FFFFFF', fontSize: 11, fontWeight: '900', textAlign: 'center' },
+  tableRow: { minHeight: 49, flexDirection: 'row', alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#34365C' },
+  activeRow: { backgroundColor: 'rgba(255,211,55,.12)', borderColor: '#E7B931', borderWidth: 1 },
+  levelColumn: { width: '36%', alignItems: 'center', justifyContent: 'center' },
+  costColumn: { width: '64%', minHeight: 49, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: '#45476D' },
+  costText: { color: '#F4F2FF', fontSize: 14, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  activeCost: { color: '#FFE66B', fontWeight: '900' },
+  youText: { color: '#FFE66B', fontSize: 8, fontWeight: '900' },
+  footerTip: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 14, borderRadius: 18, borderWidth: 1, borderColor: '#51418D', padding: 9, backgroundColor: '#17103E' },
+  footerText: { flexShrink: 1, color: '#F3EEFF', fontSize: 10.5, fontWeight: '700', textAlign: 'center' },
 });

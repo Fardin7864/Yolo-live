@@ -13,12 +13,12 @@
  *   `#D946EF`. Replace those with BRAND.primary / BRAND.primaryAlt
  *   when you touch the surrounding code — see SAAS_ONBOARDING.md
  *   "Brand depth" for the recommended progression. Untouched legacy
- *   colours still work; they're just off-palette for Care Live.
+ *   colours still work; they're just off-palette for Popular Live.
  */
 import { TENANT_CONFIG } from '../../tenant.config';
 
 export const BRAND = {
-  primary:      TENANT_CONFIG.primaryColor,    // Main accent (#1163C6 — Care Live blue)
+  primary:      TENANT_CONFIG.primaryColor,    // Main tenant accent
   primaryAlt:   TENANT_CONFIG.primaryAlt,      // Gradient companion (#20C8C8 — cyan)
   splashBg:     TENANT_CONFIG.splashBg,        // Deep dark surface (#112E93)
   success:      TENANT_CONFIG.successColor,    // Claim / completed states (#8DEB53)
@@ -35,7 +35,7 @@ export const BRAND = {
   // Frequently-used semi-transparent shades derived from primary —
   // mirrors the inline rgba(X,Y,Z,A) usages scattered around the app.
   // Components can import these instead of writing the rgba literal
-  // by hand. Care Live blue (#1163C6) gives soft, calming washes.
+  // by hand. The tenant accent gives soft, calming washes.
   primary10:    `${TENANT_CONFIG.primaryColor}1A`,  // ~10% alpha
   primary20:    `${TENANT_CONFIG.primaryColor}33`,  // ~20% alpha
   primary30:    `${TENANT_CONFIG.primaryColor}4D`,  // ~30% alpha

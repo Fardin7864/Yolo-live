@@ -17,7 +17,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  RefreshControl, Image,
+  RefreshControl, Image, Alert, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -34,6 +34,10 @@ const PERIODS = [
   { id: 'month',    label: 'Month'    },
   { id: 'all_time', label: 'All time' },
 ];
+
+const dhakaDayKey = () => new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Dhaka', year: 'numeric', month: '2-digit', day: '2-digit',
+}).format(new Date());
 
 /** Format a session's minutes count into a friendly "1h 24m" / "12m" string. */
 function formatMinutes(min) {
@@ -53,12 +57,14 @@ function compactNumber(n) {
 
 export default function HostStatsScreen() {
   const router = useRouter();
-  const { user } = useGlobalState();
+  const { user, fetchProfile } = useGlobalState();
   const [period, setPeriod]       = useState('today');
   const [stats, setStats]         = useState(null);
   const [loading, setLoading]     = useState(true);
   const [refreshing, setRefresh]  = useState(false);
   const [error, setError]         = useState(null);
+  const [dailyReward, setDailyReward] = useState(null);
+  const [claiming, setClaiming]   = useState(false);
 
   const load = useCallback(async () => {
     if (!user?.id) return;
@@ -75,11 +81,54 @@ export default function HostStatsScreen() {
     } else {
       setStats(data);
     }
+    const dhakaDate = dhakaDayKey();
+    // The reward is no longer credited automatically, so read the authoritative
+    // claim status (progress, threshold, whether it is still collectable) rather
+    // than inferring it from the table.
+    const { data: reward } = await supabase.rpc('get_host_live_reward_status');
+    setDailyReward(reward?.success ? reward : {
+      eligible_seconds: 0,
+      required_seconds: 3600,
+      reward_beans: 0,
+      claimed: false,
+      claimable: false,
+      reward_date: dhakaDate,
+    });
   }, [user?.id]);
+
+  const claimDailyReward = useCallback(async () => {
+    if (claiming) return;
+    setClaiming(true);
+    try {
+      const { data, error: claimErr } = await supabase.rpc('claim_host_live_reward');
+      if (claimErr || !data?.success) {
+        Alert.alert('Reward', data?.message || claimErr?.message || 'Could not collect the reward.');
+      } else {
+        Alert.alert('Reward collected', `${Number(data.reward_beans || 0).toLocaleString()} beans added to your wallet.`);
+        if (user?.id) await fetchProfile?.(user.id);
+      }
+      await load();
+    } finally {
+      setClaiming(false);
+    }
+  }, [claiming, load, fetchProfile, user?.id]);
 
   useEffect(() => {
     setLoading(true);
     load().finally(() => setLoading(false));
+  }, [load]);
+
+  // If this screen remains open through Bangladesh midnight, immediately show
+  // the new day's unlocked 0/60 progress instead of yesterday's claimed card.
+  useEffect(() => {
+    let previousDay = dhakaDayKey();
+    const timer = setInterval(() => {
+      const nextDay = dhakaDayKey();
+      if (nextDay === previousDay) return;
+      previousDay = nextDay;
+      load();
+    }, 30_000);
+    return () => clearInterval(timer);
   }, [load]);
 
   const onRefresh = async () => {
@@ -88,7 +137,7 @@ export default function HostStatsScreen() {
     setRefresh(false);
   };
 
-  const current = stats?.[period] || { sessions: 0, minutes: 0, gifts: 0, diamonds: 0 };
+  const current = stats?.[period] || { sessions: 0, minutes: 0, video_minutes: 0, audio_minutes: 0, video_days: 0, gifts: 0, diamonds: 0 };
   const recent  = Array.isArray(stats?.recent_sessions) ? stats.recent_sessions : [];
 
   const renderHero = () => (
@@ -148,16 +197,31 @@ export default function HostStatsScreen() {
     <View style={styles.gridWrap}>
       <View style={styles.gridRow}>
         <StatTile
-          icon="time"
+          icon="videocam"
           color="#FCD34D"
-          label="Live Time"
-          value={formatMinutes(current.minutes)}
+          label="Video Time"
+          value={formatMinutes(current.video_minutes ?? current.minutes)}
         />
+        <StatTile
+          icon="mic"
+          color="#A78BFA"
+          label="Audio Time"
+          value={formatMinutes(current.audio_minutes ?? 0)}
+        />
+      </View>
+      <View style={styles.gridRow}>
         <StatTile
           icon="radio"
           color="#38BDF8"
-          label="Live Days"
-          value={compactNumber(current.sessions)}
+          label="Valid Days"
+          value={compactNumber(current.video_days ?? current.sessions)}
+          sub="Video only"
+        />
+        <StatTile
+          icon="time"
+          color="#94A3B8"
+          label="Total Time"
+          value={formatMinutes((current.video_minutes ?? current.minutes ?? 0) + (current.audio_minutes ?? 0))}
         />
       </View>
       <View style={styles.gridRow}>
@@ -176,6 +240,53 @@ export default function HostStatsScreen() {
       </View>
     </View>
   );
+
+  const renderDailyReward = () => {
+    const requiredSeconds = Math.max(60, Number(dailyReward?.required_seconds || 3600));
+    const requiredMinutes = Math.round(requiredSeconds / 60);
+    const minutes = Math.floor(Number(dailyReward?.eligible_seconds || 0) / 60);
+    const percent = Math.min(100, Math.round((minutes / requiredMinutes) * 100));
+    const claimed = dailyReward?.claimed === true;
+    const claimable = dailyReward?.claimable === true;
+    const beans = Number(dailyReward?.reward_beans || 0).toLocaleString();
+    return <View style={styles.sessionsBox}>
+      <Text style={styles.sectionTitle}>Daily Video Reward</Text>
+      <Text style={styles.emptySub}>
+        {claimed
+          ? `${beans} beans collected today`
+          : `${minutes} / ${requiredMinutes} video minutes · ${percent}%`}
+      </Text>
+      <View style={{ height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,.1)', marginTop: 12, overflow: 'hidden' }}>
+        <LinearGradient colors={['#F59E0B', '#EC4899']} style={{ width: `${percent}%`, height: 8 }} />
+      </View>
+      {claimed ? (
+        <View style={styles.rewardClaimedRow}>
+          <Ionicons name="checkmark-circle" size={16} color="#34D399" />
+          <Text style={styles.rewardClaimedText}>Collected</Text>
+        </View>
+      ) : (
+        <TouchableOpacity
+          style={[styles.rewardClaimBtn, !claimable && styles.rewardClaimBtnDisabled]}
+          onPress={claimDailyReward}
+          disabled={!claimable || claiming}
+        >
+          {claiming ? <ActivityIndicator size="small" color="#FFF" /> : (
+            <>
+              <Ionicons name={claimable ? 'gift' : 'lock-closed'} size={16} color="#FFF" />
+              <Text style={styles.rewardClaimText}>
+                {claimable
+                  ? `Collect ${beans} beans`
+                  : `${requiredMinutes} min of video live to unlock`}
+              </Text>
+            </>
+          )}
+        </TouchableOpacity>
+      )}
+      <Text style={styles.rewardHint}>
+        Video live only. Your minutes add up across sessions during the day.
+      </Text>
+    </View>;
+  };
 
   const renderRecentSessions = () => (
     <View style={styles.sessionsBox}>
@@ -279,6 +390,7 @@ export default function HostStatsScreen() {
           {renderHero()}
           {renderPeriodSelector()}
           {renderStatsGrid()}
+          {renderDailyReward()}
           {renderEarningsCta()}
           {renderRecentSessions()}
         </ScrollView>
@@ -361,6 +473,22 @@ const styles = StyleSheet.create({
 
   sessionsBox: { marginBottom: 20 },
   sectionTitle: { color: '#FFFFFF', fontSize: 16, fontWeight: 'bold', marginBottom: 12 },
+
+  rewardClaimBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    marginTop: 14, paddingVertical: 12, borderRadius: 14,
+    backgroundColor: BRAND.primary, minHeight: 44,
+  },
+  rewardClaimBtnDisabled: { backgroundColor: 'rgba(255,255,255,0.10)' },
+  rewardClaimText: { color: '#FFFFFF', fontSize: 14, fontWeight: '800' },
+  rewardClaimedRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 6, marginTop: 14, paddingVertical: 10,
+  },
+  rewardClaimedText: { color: '#34D399', fontSize: 13, fontWeight: '800' },
+  rewardHint: {
+    color: 'rgba(255,255,255,0.35)', fontSize: 11, textAlign: 'center', marginTop: 8,
+  },
 
   emptyState: { alignItems: 'center', paddingVertical: 30 },
   emptyText: { color: 'rgba(255,255,255,0.6)', marginTop: 14, fontSize: 14, fontWeight: '600' },

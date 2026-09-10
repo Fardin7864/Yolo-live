@@ -24,6 +24,10 @@ const BUNDLED_INTRO_ASSETS = {
   'blue-roses.m4v': require('../../assets/mall/intro/blue-roses.m4v'),
 };
 
+const DEFAULT_INTRO_THUMBNAIL = BUNDLED_INTRO_ASSETS['blue-roses.webp'];
+const DEFAULT_INTRO_VIDEO = BUNDLED_INTRO_ASSETS['blue-roses.m4v'];
+const LEGACY_MEDIA_HOST = 'pfuclgmmcpzvnzapktou.supabase.co';
+
 const FALLBACK_INTRO_ITEMS = [
   {
     id: 'football-cup',
@@ -41,10 +45,14 @@ const FALLBACK_INTRO_ITEMS = [
   },
 ];
 
-const mediaSource = (url) => {
+const mediaSource = (url, fallback = null) => {
   if (typeof url === 'number') return url;
   if (url?.startsWith?.('bundled://')) return BUNDLED_INTRO_ASSETS[url.replace('bundled://', '')];
-  return url ? { uri: url } : null;
+  // These records reference the previous paused Supabase project. Showing a
+  // bundled preview is clearer than an empty card until the admin re-uploads
+  // the original asset into this project's storage bucket.
+  if (url?.includes?.(LEGACY_MEDIA_HOST)) return fallback;
+  return url ? { uri: url } : fallback;
 };
 
 const FRAME_ITEMS = [
@@ -59,6 +67,16 @@ const frameSource = (item) => {
     return BUNDLED_FRAME_ASSETS[item.id];
   }
   return item?.frame_url ? { uri: item.frame_url } : item?.image;
+};
+
+const cosmeticTimeLabel = (item, ownership) => {
+  const exclusive = item?.access_scope === 'admin_only' ? ' · Exclusive' : '';
+  if (!ownership) return `${item?.validity_days || 7} days${exclusive}`;
+  if (!ownership.expires_at) return `Permanent${exclusive}`;
+  const milliseconds = new Date(ownership.expires_at).getTime() - Date.now();
+  if (milliseconds <= 0) return `Expired${exclusive}`;
+  const hours = Math.max(1, Math.ceil(milliseconds / 3600000));
+  return `${hours >= 48 ? `${Math.ceil(hours / 24)} days` : `${hours} hours`} left${exclusive}`;
 };
 
 const CATALOG = [
@@ -124,8 +142,12 @@ function OwnedCard({ item, width, onPress }) {
   );
 }
 
-function IntroCard({ item, width, selected, owned, active, onPress }) {
+function IntroCard({ item, width, selected, owned, active, ownership, onPress }) {
   const statusLabel = active ? 'Using' : owned ? 'Use' : null;
+  const [thumbnailFailed, setThumbnailFailed] = useState(false);
+  const thumbnailSource = thumbnailFailed
+    ? DEFAULT_INTRO_THUMBNAIL
+    : mediaSource(item.thumbnail_url, DEFAULT_INTRO_THUMBNAIL) || item.thumbnail || DEFAULT_INTRO_THUMBNAIL;
 
   return (
     <TouchableOpacity
@@ -133,7 +155,11 @@ function IntroCard({ item, width, selected, owned, active, onPress }) {
       style={[styles.introCard, { width }, selected && styles.introCardSelected]}
       onPress={onPress}
     >
-      <Image source={mediaSource(item.thumbnail_url) || item.thumbnail} style={styles.introThumbnail} />
+      <Image
+        source={thumbnailSource}
+        style={styles.introThumbnail}
+        onError={() => setThumbnailFailed(true)}
+      />
       <LinearGradient colors={['transparent', 'rgba(5,6,28,.96)']} style={styles.introShade} />
       <View style={styles.previewPill}>
         <Ionicons name="play" size={12} color="#FFFFFF" />
@@ -143,6 +169,7 @@ function IntroCard({ item, width, selected, owned, active, onPress }) {
         <View style={styles.selectedBadge}><Ionicons name="checkmark" size={14} color="#FFFFFF" /></View>
       ) : null}
       <Text style={styles.introName} numberOfLines={2}>{item.name}</Text>
+      <Text style={styles.cosmeticDuration}>{cosmeticTimeLabel(item, ownership)}</Text>
       {statusLabel ? (
         <View style={[styles.introStatusPill, active && styles.introStatusPillActive]}>
           <Text style={styles.introStatusText}>{statusLabel}</Text>
@@ -169,7 +196,7 @@ function ProfileAvatar({ user, style }) {
   );
 }
 
-function FrameCard({ item, width, user, selected, onPress }) {
+function FrameCard({ item, width, user, selected, ownership, onPress }) {
   return (
     <TouchableOpacity
       activeOpacity={0.88}
@@ -184,6 +211,7 @@ function FrameCard({ item, width, user, selected, onPress }) {
         ) : null}
       </View>
       <Text style={styles.frameName} numberOfLines={1}>{item.name}</Text>
+      <Text style={styles.frameDuration}>{cosmeticTimeLabel(item, ownership)}</Text>
       <View style={styles.introPriceRow}>
         <Ionicons name="diamond" size={12} color="#72A9FF" />
         <Text style={styles.introPrice}>{formatNumber(item.diamond_cost ?? item.price)}</Text>
@@ -193,7 +221,10 @@ function FrameCard({ item, width, user, selected, onPress }) {
 }
 
 function AnimationPreview({ item, onClose }) {
-  const introSource = useMemo(() => mediaSource(item.video_url) || item.video, [item]);
+  const introSource = useMemo(
+    () => mediaSource(item.video_url, DEFAULT_INTRO_VIDEO) || item.video || DEFAULT_INTRO_VIDEO,
+    [item],
+  );
   const { player, ready, finish } = useOneShotIntroPlayer(introSource, onClose);
 
   return (
@@ -288,11 +319,26 @@ export default function MallScreen() {
   const [selectedFrame, setSelectedFrame] = useState(FRAME_ITEMS[0]);
   const [availableFrames, setAvailableFrames] = useState(FRAME_ITEMS);
   const [buyingFrame, setBuyingFrame] = useState(false);
+  const [frameOwnership, setFrameOwnership] = useState({});
+  const [introOwnership, setIntroOwnership] = useState({});
   const refreshUserRef = useRef(refreshUser);
   const ownedIntroIds = useMemo(
     () => new Set(Array.isArray(user?.ownedMallIntros) ? user.ownedMallIntros : []),
     [user?.ownedMallIntros],
   );
+
+  const loadCosmeticOwnership = useCallback(async () => {
+    if (!user?.id) return;
+    await supabase.rpc('cleanup_expired_cosmetics', { p_user: user.id });
+    const [frames, intros] = await Promise.all([
+      supabase.from('user_profile_frames').select('frame_id,expires_at,acquisition_source').eq('user_id', user.id),
+      supabase.from('user_mall_intros').select('intro_id,expires_at,acquisition_source').eq('user_id', user.id),
+    ]);
+    const active = (row) => !row.expires_at || new Date(row.expires_at).getTime() > Date.now();
+    setFrameOwnership(Object.fromEntries((frames.data || []).filter(active).map((row) => [row.frame_id, row])));
+    setIntroOwnership(Object.fromEntries((intros.data || []).filter(active).map((row) => [row.intro_id, row])));
+  }, [user?.id]);
+  useEffect(() => { loadCosmeticOwnership(); }, [loadCosmeticOwnership]);
 
   useEffect(() => {
     setMode(params.tab === 'props' ? 'props' : 'mall');
@@ -400,31 +446,38 @@ export default function MallScreen() {
   const buySelectedFrame = async () => {
     if (!selectedFrame || buyingFrame) return;
     setBuyingFrame(true);
-    const { data, error } = await supabase.rpc('purchase_profile_frame', { p_frame_id: selectedFrame.id });
+    const owned = !!frameOwnership[selectedFrame.id];
+    const active = user?.selectedProfileFrame === selectedFrame.id;
+    const { data, error } = owned && !active
+      ? await supabase.rpc('equip_cosmetic', { p_kind: 'frame', p_item_id: selectedFrame.id })
+      : await supabase.rpc('purchase_profile_frame', { p_frame_id: selectedFrame.id });
     if (!error && data?.success) await refreshUser();
+    if (!error && data?.success) await loadCosmeticOwnership();
     setBuyingFrame(false);
     if (error) {
       Alert.alert('Purchase failed', error.message);
       return;
     }
-    Alert.alert('Frame selected', `${selectedFrame.name} is now your permanent profile frame.`);
+    Alert.alert(owned && !active ? 'Frame selected' : owned ? 'Frame extended' : 'Frame purchased', `${selectedFrame.name} is active${data?.expires_at ? ` until ${new Date(data.expires_at).toLocaleDateString()}` : ''}.`);
   };
 
   const buySelectedIntro = async () => {
     if (!selectedIntro || buyingIntro) return;
-    const isOwned = ownedIntroIds.has(selectedIntro.id);
+    const isOwned = !!introOwnership[selectedIntro.id];
     const isActive = user?.selectedMallIntro === selectedIntro.id;
-    if (isOwned && isActive) return;
 
     setBuyingIntro(true);
-    const { data, error } = await supabase.rpc('purchase_mall_intro', { p_intro_id: selectedIntro.id });
+    const { data, error } = isOwned && !isActive
+      ? await supabase.rpc('equip_cosmetic', { p_kind: 'intro', p_item_id: selectedIntro.id })
+      : await supabase.rpc('purchase_mall_intro', { p_intro_id: selectedIntro.id });
     if (!error && data?.success) await refreshUser();
+    if (!error && data?.success) await loadCosmeticOwnership();
     setBuyingIntro(false);
     if (error) {
       Alert.alert('Purchase failed', error.message);
       return;
     }
-    Alert.alert(isOwned ? 'Intro selected' : 'Intro purchased', `${selectedIntro.name} will play when you join a live room.`);
+    Alert.alert(isOwned && !isActive ? 'Intro selected' : isOwned ? 'Intro extended' : 'Intro purchased', `${selectedIntro.name} will play when you join a live room${data?.expires_at ? ` until ${new Date(data.expires_at).toLocaleDateString()}` : ''}.`);
   };
 
   const openSendIntro = (intro) => {
@@ -546,7 +599,8 @@ export default function MallScreen() {
                     item={item}
                     width={cardWidth}
                     selected={selectedIntro?.id === item.id}
-                    owned={ownedIntroIds.has(item.id)}
+                    owned={!!introOwnership[item.id]}
+                    ownership={introOwnership[item.id]}
                     active={user?.selectedMallIntro === item.id}
                     onPress={() => {
                       setSelectedIntro(item);
@@ -560,6 +614,7 @@ export default function MallScreen() {
                     width={cardWidth}
                     user={user}
                     selected={selectedFrame.id === item.id}
+                    ownership={frameOwnership[item.id]}
                     onPress={() => setSelectedFrame(item)}
                   />
                 )) : products.map((item) => (
@@ -611,14 +666,15 @@ export default function MallScreen() {
         {mode === 'mall' && category === 'Intro' && selectedIntro ? (
           <IntroActions
             item={selectedIntro}
-            primaryLabel={user?.selectedMallIntro === selectedIntro.id ? 'Using' : ownedIntroIds.has(selectedIntro.id) ? 'Use' : 'Buy'}
-            primaryDisabled={user?.selectedMallIntro === selectedIntro.id}
+            primaryLabel={user?.selectedMallIntro === selectedIntro.id ? 'Extend' : introOwnership[selectedIntro.id] ? 'Use' : 'Buy'}
+            primaryDisabled={false}
             onBuy={buySelectedIntro}
             onSend={() => openSendIntro(selectedIntro)}
           />
         ) : mode === 'mall' && category === 'Frame' && selectedFrame ? (
           <IntroActions
             item={selectedFrame}
+            primaryLabel={user?.selectedProfileFrame === selectedFrame.id ? 'Extend' : frameOwnership[selectedFrame.id] ? 'Use' : 'Buy'}
             onBuy={buySelectedFrame}
             onSend={() => Alert.alert('Send Frame', `${selectedFrame.name} is selected. Choose-a-friend gifting will be connected here.`)}
           />
@@ -710,6 +766,7 @@ const styles = StyleSheet.create({
   previewPillText: { color: '#FFFFFF', fontSize: 9.5, fontWeight: '700' },
   selectedBadge: { position: 'absolute', top: 7, right: 7, width: 25, height: 25, borderRadius: 13, backgroundColor: '#8C40F3', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#D8B8FF' },
   introName: { position: 'absolute', left: 8, right: 8, bottom: 28, color: '#FFFFFF', fontSize: 11.5, lineHeight: 15, textAlign: 'center', fontWeight: '700' },
+  cosmeticDuration: { position: 'absolute', right: 6, top: 38, color: '#FFFFFF', fontSize: 8.5, fontWeight: '800', backgroundColor: 'rgba(8,10,35,.78)', paddingHorizontal: 5, paddingVertical: 2, borderRadius: 7 },
   introPriceRow: { position: 'absolute', left: 8, right: 8, bottom: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4 },
   introPrice: { color: '#A96BFF', fontSize: 11, fontWeight: '900' },
   introStatusPill: { position: 'absolute', left: 8, right: 8, bottom: 8, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(27, 186, 202, 0.86)', borderWidth: 1, borderColor: 'rgba(255,255,255,.3)' },
@@ -729,6 +786,7 @@ const styles = StyleSheet.create({
   frameCardAvatar: { position: 'absolute', width: 71, height: 71, borderRadius: 36, resizeMode: 'cover' },
   frameCardArtwork: { width: 112, height: 112, resizeMode: 'contain' },
   frameName: { color: '#FFFFFF', fontSize: 10.5, fontWeight: '700', textAlign: 'center', marginTop: 6 },
+  frameDuration: { color: '#A9A4CA', fontSize: 8.5, fontWeight: '700', textAlign: 'center', marginTop: 2 },
   introActions: { position: 'absolute', left: 16, right: 16, bottom: 12, zIndex: 10, padding: 11, borderRadius: 15, borderWidth: 1, borderColor: 'rgba(151,75,255,.55)', backgroundColor: 'rgba(24,18,62,.96)', shadowColor: '#812DDE', shadowOpacity: .38, shadowRadius: 14, elevation: 12 },
   selectedIntroLabel: { color: '#EDE9FF', fontSize: 11.5, fontWeight: '700', textAlign: 'center', marginBottom: 9 },
   introActionRow: { flexDirection: 'row', gap: 10 },

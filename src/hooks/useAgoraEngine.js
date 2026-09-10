@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { AppState } from 'react-native';
 import {
   createAgoraRtcEngine,
   ChannelProfileType,
@@ -68,6 +69,53 @@ export function useAgoraEngine({ channelName, role, isVideo, enabled = true }) {
   // had self-muted suddenly goes live. The handlers below watch for
   // those recovery events and re-apply the user's intent.
   const desiredMuteRef = useRef(false);
+  const tokenRenewalRef = useRef(null);
+
+  const renewAgoraToken = useCallback(async () => {
+    if (tokenRenewalRef.current) return tokenRenewalRef.current;
+    tokenRenewalRef.current = (async () => {
+      try {
+        const creds = await fetchAgoraToken(channelName, roleRef.current);
+        if (!creds?.token) throw new Error('Token service returned no token');
+        engineRef.current?.renewToken(creds.token);
+        setError(null);
+        return true;
+      } catch (e) {
+        if (__DEV__) console.warn('Agora token renewal failed:', e?.message);
+        setError('Live connection needs to reconnect');
+        return false;
+      } finally {
+        tokenRenewalRef.current = null;
+      }
+    })();
+    return tokenRenewalRef.current;
+  }, [channelName]);
+
+  const restoreMediaAfterReconnect = useCallback(() => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    const publish = roleRef.current === 'publisher';
+    try {
+      engine.setClientRole(publish
+        ? ClientRoleType.ClientRoleBroadcaster
+        : ClientRoleType.ClientRoleAudience);
+      engine.updateChannelMediaOptions({
+        publishMicrophoneTrack: publish,
+        publishCameraTrack: publish && isVideo,
+        autoSubscribeAudio: true,
+        autoSubscribeVideo: isVideo,
+      });
+      engine.muteLocalAudioStream(desiredMuteRef.current);
+    } catch (_) {}
+  }, [isVideo]);
+
+  // Every restart of the local video pipeline drops engine-side video
+  // post-processing (Agora's beauty effect among it). Callers cannot see those
+  // restarts, so publish a counter they can depend on to re-apply their effects.
+  // Bumped on: publisher role switch, camera re-enable, camera flip, initial
+  // preview, and app foreground.
+  const [videoEpoch, setVideoEpoch] = useState(0);
+  const bumpVideoEpoch = useCallback(() => setVideoEpoch((n) => n + 1), []);
 
   // --- Apply a role to the live engine (no rejoin) ---
   const applyRole = useCallback(async (nextRole) => {
@@ -88,6 +136,7 @@ export function useAgoraEngine({ channelName, role, isVideo, enabled = true }) {
           engine.enableLocalVideo(true);
           engine.muteLocalVideoStream(false);
           engine.startPreview();
+          bumpVideoEpoch();
         }
         engine.updateChannelMediaOptions({
           publishMicrophoneTrack: true,
@@ -137,7 +186,26 @@ export function useAgoraEngine({ channelName, role, isVideo, enabled = true }) {
       // before any remote user join event can be missed.
       engine.registerEventHandler({
         onJoinChannelSuccess: () => {
-          if (!cancelled) { setJoined(true); setLocalUid(adopted.uid); }
+          if (!cancelled) { setJoined(true); setLocalUid(adopted.uid); setError(null); }
+        },
+        onTokenPrivilegeWillExpire: renewAgoraToken,
+        onRequestToken: renewAgoraToken,
+        onRejoinChannelSuccess: () => {
+          if (cancelled) return;
+          setJoined(true);
+          setError(null);
+          restoreMediaAfterReconnect();
+        },
+        onConnectionStateChanged: (_conn, state) => {
+          if (cancelled) return;
+          if (state === 3) {
+            setJoined(true);
+            setError(null);
+            restoreMediaAfterReconnect();
+          } else if (state === 5) {
+            setJoined(false);
+            setError('Live connection lost');
+          }
         },
         onUserJoined: (_conn, uid) => {
           if (!cancelled) setRemoteUids((prev) => prev.includes(uid) ? prev : [...prev, uid]);
@@ -243,7 +311,26 @@ export function useAgoraEngine({ channelName, role, isVideo, enabled = true }) {
         // 3. Event handlers
         engine.registerEventHandler({
           onJoinChannelSuccess: () => {
-            if (!cancelled) { setJoined(true); setLocalUid(creds.uid); }
+            if (!cancelled) { setJoined(true); setLocalUid(creds.uid); setError(null); }
+          },
+          onTokenPrivilegeWillExpire: renewAgoraToken,
+          onRequestToken: renewAgoraToken,
+          onRejoinChannelSuccess: () => {
+            if (cancelled) return;
+            setJoined(true);
+            setError(null);
+            restoreMediaAfterReconnect();
+          },
+          onConnectionStateChanged: (_conn, state) => {
+            if (cancelled) return;
+            if (state === 3) {
+              setJoined(true);
+              setError(null);
+              restoreMediaAfterReconnect();
+            } else if (state === 5) {
+              setJoined(false);
+              setError('Live connection lost');
+            }
           },
           onUserJoined: (_conn, uid) => {
             if (!cancelled) setRemoteUids((prev) => prev.includes(uid) ? prev : [...prev, uid]);
@@ -353,6 +440,7 @@ export function useAgoraEngine({ channelName, role, isVideo, enabled = true }) {
               if (__DEV__) console.warn('Agora encoder config failed:', e?.message);
             }
             engine.startPreview();
+            bumpVideoEpoch();
           }
         } else {
           engine.disableVideo();
@@ -403,7 +491,7 @@ export function useAgoraEngine({ channelName, role, isVideo, enabled = true }) {
       setVideoOffUids([]);
     };
     // Deliberately exclude `role` — role changes are applied live below.
-  }, [enabled, channelName, isVideo]);
+  }, [enabled, channelName, isVideo, renewAgoraToken, restoreMediaAfterReconnect]);
 
   // --- Apply role changes live (after the initial join) ---
   const lastAppliedRole = useRef(role);
@@ -433,6 +521,8 @@ export function useAgoraEngine({ channelName, role, isVideo, enabled = true }) {
       if (!engine) return;
       engine.enableLocalVideo(on);
       engine.muteLocalVideoStream(!on);
+      // Re-enabling the capturer rebuilds the pipeline; effects must be re-applied.
+      if (on) bumpVideoEpoch();
       engine.updateChannelMediaOptions({
         publishMicrophoneTrack: true,
         publishCameraTrack: !!on && isVideo,
@@ -454,9 +544,22 @@ export function useAgoraEngine({ channelName, role, isVideo, enabled = true }) {
     } catch (_) {}
   }, [isVideo]);
 
+  // Android tears the camera down when the app is backgrounded and rebuilds it
+  // on resume, which also clears video effects. Nothing else observes that, so
+  // the epoch has to cover it too.
+  useEffect(() => {
+    if (!isVideo) return undefined;
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'active') bumpVideoEpoch();
+    });
+    return () => { try { sub?.remove(); } catch (_) {} };
+  }, [isVideo, bumpVideoEpoch]);
+
   const switchCamera = useCallback(() => {
+    // Flipping cameras swaps the capture source and clears engine-side effects.
     try { engineRef.current?.switchCamera(); } catch (_) {}
-  }, []);
+    bumpVideoEpoch();
+  }, [bumpVideoEpoch]);
 
   // Explicit publish toggle (kept for callers that want to force it)
   const setPublishing = useCallback((publish) => {
@@ -479,5 +582,6 @@ export function useAgoraEngine({ channelName, role, isVideo, enabled = true }) {
     setRemoteVideoPaused,
     switchCamera,
     setPublishing,
+    videoEpoch,
   };
 }

@@ -34,7 +34,7 @@ import { Image, View, StyleSheet } from 'react-native';
 // MUST exist at this path before bundling. If you see "Cannot find
 // module 'assets/loader/logo-loader.gif'" during dev, drop the file
 // in place and restart Metro.
-const LOGO_SOURCE = require('../../assets/loader/logo-loader.gif');
+const LOGO_SOURCE = require('../../assets/popular-live-logo.png');
 
 const SIZE_MAP = {
   small:  40,

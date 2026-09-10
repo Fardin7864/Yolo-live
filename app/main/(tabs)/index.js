@@ -13,10 +13,7 @@ import { useGlobalState } from '../../../src/context/GlobalStateContext';
 import { supabase } from '../../../src/api/supabase';
 import SvipNameTag from '../../../src/components/SvipNameTag';
 
-const LOCAL_HERO = require('../../../assets/onboarding/welcome-loading.webp');
 const LOCAL_AVATAR = require('../../../assets/splash-icon.png');
-const APP_BACKGROUND = require('../../../assets/backgrounds/neon-space.webp');
-const AUTH_BACKGROUND = require('../../../assets/onboarding/google-auth-background.webp');
 const SECTION_ICONS = {
   events: require('../../../assets/home/icons/events.png'),
   nearby: require('../../../assets/home/icons/nearby.png'),
@@ -38,11 +35,6 @@ const HOME_PROFILE_FRAMES = {
   'angel-wing': require('../../../assets/mall/frames/angel-wing.webp'),
   'royal-gold': require('../../../assets/mall/frames/royal-gold.webp'),
 };
-const FALLBACK_CAROUSEL = [
-  LOCAL_HERO, AUTH_BACKGROUND, APP_BACKGROUND, EMPTY_BACKGROUNDS.live, EMPTY_BACKGROUNDS.nearby,
-  EMPTY_BACKGROUNDS.events, LOCAL_HERO, APP_BACKGROUND, AUTH_BACKGROUND, EMPTY_BACKGROUNDS.live,
-];
-
 const CATEGORY_ITEMS = [
   { key: 'Trending', icon: 'flame' },
   { key: 'Audio', icon: 'musical-notes' },
@@ -55,37 +47,30 @@ const CATEGORY_ITEMS = [
 const QUICK_ACTIONS = [
   { key: 'tasks', title: 'Tasks', subtitle: 'Complete & earn', meta: '🪙 120', colors: ['#5C1BC6', '#B914D1', '#F00CB8'], glow: '#FF55E6', route: '/main/tasks' },
   { key: 'vip', title: 'VIP', subtitle: 'Exclusive perks', meta: 'VIP 3', colors: ['#7C283E', '#B55527', '#E18A19'], glow: '#FFB53D', route: '/main/vip' },
-  { key: 'network', title: 'Network', subtitle: 'Grow your circle', meta: '+ New people', colors: ['#1645A8', '#0079AE', '#00A7A4'], glow: '#35E7FF', route: '/main/network' },
+  { key: 'ranking', title: 'Ranking', subtitle: 'Daily leaders', meta: 'Top hosts', icon: 'trophy', colors: ['#7A4A08', '#B77912', '#D6A52A'], glow: '#FFD76A', route: '/main/(tabs)/explore' },
   { key: 'svip', title: 'SVIP', subtitle: 'Super privileges', meta: 'SVIP', colors: ['#4D1D95', '#8B2AE6', '#D97706'], glow: '#FCD34D', route: '/main/svip' },
 ];
 
 const GAME_ITEMS = [
   {
-    key: 'fruit_roulette',
-    title: 'Fruit Roulette',
-    subtitle: 'Pick a fruit. Win up to 8x.',
-    icon: 'disc',
-    emoji: '🍓',
-    colors: ['#FF336A', '#7B2DFF', '#1C1162'],
-    chip: 'Multiplayer',
-  },
-  {
-    key: 'teen_patti',
-    title: 'Teen Patti',
-    subtitle: 'Bet on A, B or C. Winner pays 2x.',
-    icon: 'albums',
-    emoji: '🃏',
-    colors: ['#0EA5E9', '#5137E8', '#160C5A'],
-    chip: 'Cards',
-  },
-  {
     key: 'greedy_lion',
-    title: 'Greedy Lion',
+    title: 'Populer Greedy',
     subtitle: 'Pick up to 6 foods. Pizza or Salad wins.',
     icon: 'trophy',
     emoji: '🦁',
+    image: require('../../../assets/games/greedy-lion/icon.webp'),
     colors: ['#F59E0B', '#B91C9B', '#11115F'],
     chip: 'Native',
+  },
+  {
+    key: 'greedy_pro',
+    title: 'Greedy King',
+    subtitle: 'Spin the feast wheel in the new full-screen game.',
+    icon: 'restaurant',
+    emoji: '🍕',
+    image: require('../../../assets/games/greedy-pro/icon.webp'),
+    colors: ['#FFD83D', '#D5113A', '#18AFCF'],
+    chip: 'Global',
   },
   {
     key: 'tin_patti_pro',
@@ -93,12 +78,33 @@ const GAME_ITEMS = [
     subtitle: 'One shared pro card table.',
     icon: 'albums',
     emoji: 'TP',
+    image: require('../../../assets/games/tin-patti-pro/icon.webp'),
     colors: ['#F59E0B', '#0F8A5F', '#5C1BC6'],
     chip: 'Global',
   },
+  {
+    key: 'lucky_dice',
+    title: 'Lucky Dice Royale',
+    subtitle: 'Three royal dice. Multiple winning bets.',
+    icon: 'dice',
+    emoji: 'DICE',
+    image: require('../../../assets/games/lucky-dice/icon.webp'),
+    colors: ['#D3A43D', '#12633F', '#431832'],
+    chip: 'Global',
+  },
+  {
+    key: 'crash',
+    title: 'Crash',
+    subtitle: 'Ride the multiplier and cash out before it crashes.',
+    icon: 'rocket',
+    emoji: '🚀',
+    image: require('../../../assets/games/crash/icon.webp'),
+    colors: ['#101B3D', '#5942D6', '#E25272'],
+    chip: 'Live',
+  },
 ];
 
-const PAGE_SIZE = 10;
+const PAGE_SIZE = 50;
 
 const formatCount = (value) => {
   const n = Number(value) || 0;
@@ -123,19 +129,29 @@ function HomeHeader({ user, unreadCount, onProfile, onSearch, onNotifications })
 
   return (
     <View style={styles.header}>
-      <TouchableOpacity onPress={onProfile} activeOpacity={0.82} style={styles.avatarTouch}>
-        <LinearGradient colors={['#20D8FF', '#8B43FF', '#F62AD9']} style={styles.avatarRing}>
-          <SafeImage uri={user?.avatar} style={styles.headerAvatar} />
-        </LinearGradient>
-        {purchasedFrame ? (
-          <Image pointerEvents="none" source={purchasedFrame} style={styles.headerProfileFrame} />
-        ) : null}
-        <View style={styles.onlineDot} />
-        {!purchasedFrame ? (
-          <View style={styles.crownBubble}>
-            <Text style={styles.crownText}>👑</Text>
+      <TouchableOpacity onPress={onProfile} activeOpacity={0.82} style={styles.headerProfileGroup}>
+        <View style={styles.avatarTouch}>
+          <LinearGradient colors={['#20D8FF', '#8B43FF', '#F62AD9']} style={styles.avatarRing}>
+            <SafeImage uri={user?.avatar} style={styles.headerAvatar} />
+          </LinearGradient>
+          {purchasedFrame ? (
+            <Image pointerEvents="none" source={purchasedFrame} style={styles.headerProfileFrame} />
+          ) : null}
+          <View style={styles.onlineDot} />
+          {!purchasedFrame ? (
+            <View style={styles.crownBubble}>
+              <Text style={styles.crownText}>👑</Text>
+            </View>
+          ) : null}
+        </View>
+        <View style={styles.headerProfileCopy}>
+          <View style={styles.headerNameRow}>
+            <Text style={styles.headerName} numberOfLines={1}>{user?.name || 'Popular Live User'}</Text>
+            <SvipNameTag vipType={user?.vipType} compact />
           </View>
-        ) : null}
+          <Text style={styles.headerMeta} numberOfLines={1}>ID: {user?.displayId || '—'}  •  Lv.{Math.max(1, Number(user?.level) || 1)}</Text>
+          {user?.nickname ? <Text style={styles.headerNickname} numberOfLines={1}>{user.nickname}</Text> : null}
+        </View>
       </TouchableOpacity>
       <View style={styles.headerActions}>
         <TouchableOpacity accessibilityLabel="Search" onPress={onSearch} style={styles.headerIcon}>
@@ -184,20 +200,24 @@ function CategoryTabs({ active, onChange }) {
   );
 }
 
-function ImageCarousel({ banners, width, onPress, compact = false, reverseFallback = false }) {
+function ImageCarousel({ banners, width, compact = false }) {
   const listRef = useRef(null);
   const [active, setActive] = useState(0);
   const paused = useRef(false);
   const resumeTimer = useRef(null);
   const slideWidth = width - 32;
   const slides = useMemo(() => {
-    const fallback = reverseFallback ? [...FALLBACK_CAROUSEL].reverse() : FALLBACK_CAROUSEL;
-    return Array.from({ length: 10 }, (_, index) => ({
-      id: banners[index]?.id || `local-carousel-${compact ? 'secondary' : 'primary'}-${index}`,
-      source: banners[index]?.image_url ? { uri: banners[index].image_url } : fallback[index],
-      linkUrl: banners[index]?.link_url || null,
-    }));
-  }, [banners, compact, reverseFallback]);
+    // Render only active admin-managed banners. There must be no bundled
+    // carousel fallbacks, otherwise old promotional artwork appears when
+    // the dashboard has no active banner configured.
+    return (banners || [])
+      .filter((banner) => banner?.is_active !== false && banner?.image_url)
+      .map((banner) => ({
+        id: banner.id,
+        source: { uri: banner.image_url },
+        linkUrl: banner.link_url || null,
+      }));
+  }, [banners]);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -219,6 +239,8 @@ function ImageCarousel({ banners, width, onPress, compact = false, reverseFallba
     resumeTimer.current = setTimeout(() => { paused.current = false; }, 3000);
   };
 
+  if (slides.length === 0) return null;
+
   return (
     <View style={[styles.heroShell, compact && styles.secondaryCarousel]}>
       <FlatList
@@ -235,9 +257,9 @@ function ImageCarousel({ banners, width, onPress, compact = false, reverseFallba
           resumeAutoplay();
         }}
         renderItem={({ item }) => (
-          <TouchableOpacity activeOpacity={0.96} onPress={() => onPress(item)} style={[styles.heroCard, compact && styles.secondarySlide, { width: slideWidth }]}>
+          <View style={[styles.heroCard, compact && styles.secondarySlide, { width: slideWidth }]}>
             <Image source={item.source} style={styles.carouselImage} resizeMode="cover" />
-          </TouchableOpacity>
+          </View>
         )}
       />
     </View>
@@ -255,7 +277,11 @@ function QuickActionCard({ item, onPress }) {
       >
         <View style={[styles.quickGlow, { backgroundColor: `${item.glow}26` }]} />
         <View style={[styles.quickIconShell, { borderColor: `${item.glow}70` }]}>
-          <Image source={ACTION_ICONS[item.key]} style={styles.quickAsset} resizeMode="contain" />
+          {item.icon ? (
+            <Ionicons name={item.icon} size={30} color="#FFE08A" />
+          ) : (
+            <Image source={ACTION_ICONS[item.key]} style={styles.quickAsset} resizeMode="contain" />
+          )}
         </View>
         <View style={styles.quickCopy}>
           <Text style={styles.quickTitle} numberOfLines={1} adjustsFontSizeToFit>{item.title}</Text>
@@ -285,7 +311,13 @@ function LiveStreamCard({ stream, onPress, style }) {
     <TouchableOpacity activeOpacity={0.88} onPress={onPress} style={[styles.liveCard, style]}>
       <SafeImage uri={stream.coverUrl} style={styles.liveCover} />
       <LinearGradient colors={['transparent', 'rgba(4,5,28,.96)']} style={styles.liveShade} />
-      <View style={styles.cardLivePill}><Text style={styles.cardLiveText}>LIVE</Text></View>
+      <View style={styles.cardBadgeRow}>
+        <View style={styles.cardLivePill}><Text style={styles.cardLiveText}>LIVE</Text></View>
+        <View style={[styles.cardTypePill, stream.streamType === 'audio' && styles.cardTypePillAudio]}>
+          <Ionicons name={stream.streamType === 'audio' ? 'mic' : 'videocam'} size={9} color="#FFF" />
+          <Text style={styles.cardTypeText}>{stream.streamType === 'audio' ? 'AUDIO' : 'VIDEO'}</Text>
+        </View>
+      </View>
       <View style={styles.viewerPill}>
         <Ionicons name="eye" size={11} color="#FFF" />
         <Text style={styles.viewerText}>{formatCount(stream.viewerCount)}</Text>
@@ -360,7 +392,7 @@ function GameCard({ game, onPress, style }) {
       <LinearGradient colors={game.colors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.gameCard}>
         <View style={styles.gameCardGlow} />
         <View style={styles.gameIconBubble}>
-          <Text style={styles.gameEmoji}>{game.emoji}</Text>
+          <Image source={game.image} style={styles.gameIconImage} />
         </View>
         <Ionicons name={game.icon} size={52} color="rgba(255,255,255,.18)" style={styles.gameWatermark} />
         <View style={styles.gameCardCopy}>
@@ -370,33 +402,6 @@ function GameCard({ game, onPress, style }) {
         <View style={styles.gameCardFooter}>
           <Text style={styles.gameChipText}>{game.chip}</Text>
           <Ionicons name="chevron-forward" size={16} color="#FFFFFF" />
-        </View>
-      </LinearGradient>
-    </TouchableOpacity>
-  );
-}
-
-function EventCard({ event, index, onPress }) {
-  const themes = [
-    ['#64105E', '#3926A8', '#07113D'],
-    ['#003968', '#063B86', '#120B58'],
-    ['#6C0A92', '#38119A', '#07113D'],
-  ];
-  const names = ['SING OFF', 'GAME NIGHT', 'DANCE BATTLE'];
-  const icons = ['mic', 'game-controller', 'accessibility'];
-  const times = ['Today 8:00 PM', 'Tonight 9:00 PM', 'Sat 10:00 PM'];
-  return (
-    <TouchableOpacity activeOpacity={0.88} onPress={onPress} style={styles.eventTouch}>
-      <LinearGradient colors={themes[index % themes.length]} style={styles.eventCard}>
-        {event?.image_url ? <Image source={{ uri: event.image_url }} style={styles.eventImage} /> : null}
-        <LinearGradient colors={['rgba(8,5,40,.08)', 'rgba(4,4,26,.84)']} style={styles.eventShade} />
-        <Ionicons name={icons[index % icons.length]} size={66} color="rgba(137,213,255,.42)" style={styles.eventIcon} />
-        <Text style={styles.eventTitle}>{event?.title || names[index % names.length]}</Text>
-        <View style={styles.eventLabel}><Text style={styles.eventLabelText}>LIVE EVENT</Text></View>
-        <Text style={styles.eventTime}>{event?.subtitle || times[index % times.length]}</Text>
-        <View style={styles.attendeeRow}>
-          {[0, 1, 2].map((n) => <Image key={n} source={LOCAL_AVATAR} style={[styles.attendeeAvatar, n > 0 && { marginLeft: -7 }]} />)}
-          <Text style={styles.attendeeText}>{event?.attendees || `${6 + index * 3}.2K`}</Text>
         </View>
       </LinearGradient>
     </TouchableOpacity>
@@ -430,11 +435,9 @@ function EmptySection({ background, title, subtitle, action, actionIcon, onPress
 export default function PremiumHomeScreen() {
   const router = useRouter();
   const { width } = useWindowDimensions();
-  const { user, homeBanners, gameSettings } = useGlobalState();
+  const { user, homeBanners, gameSettings, loadHomeBanners } = useGlobalState();
   const [activeCategory, setActiveCategory] = useState('Trending');
   const [liveStreams, setLiveStreams] = useState([]);
-  const [liveHasMore, setLiveHasMore] = useState(false);
-  const [loadingMoreLive, setLoadingMoreLive] = useState(false);
   const [hosts, setHosts] = useState([]);
   const [nearbyHosts, setNearbyHosts] = useState([]);
   const [hostHasMore, setHostHasMore] = useState(false);
@@ -450,8 +453,10 @@ export default function PremiumHomeScreen() {
     () => GAME_ITEMS.filter((game) => gameSettings?.[game.key]?.is_active !== false),
     [gameSettings],
   );
-  const liveFirstPage = liveStreams.slice(0, 4);
-  const liveRest = liveStreams.slice(4);
+  // Keep the second (bottom-banner) carousel immediately after the first
+  // two live rooms, so it is visible without scrolling through a whole row.
+  const liveFirstPage = liveStreams.slice(0, 2);
+  const liveRest = liveStreams.slice(2);
   const hostList = showNearby ? nearbyHosts : hosts;
   const hostFirstPage = hostList.slice(0, 4);
   const hostRest = hostList.slice(4);
@@ -469,23 +474,35 @@ export default function PremiumHomeScreen() {
     return () => { supabase.removeChannel(channel); };
   }, [user?.id]);
 
-  const fetchLiveStreams = useCallback(async ({ reset = false, offset = 0 } = {}) => {
+  useEffect(() => {
+    Promise.resolve(loadHomeBanners?.()).catch(() => {});
+  }, [loadHomeBanners]);
+
+  const fetchLiveStreams = useCallback(async () => {
     try { await supabase.rpc('cleanup_stale_live_streams'); } catch (_) {}
-    const pageOffset = reset ? 0 : offset;
-    let query = supabase.from('live_streams')
-      .select('id, broadcaster_id, type, title, tag, cover_url, current_viewers, peak_viewers, total_gifts, last_heartbeat_at, profiles:broadcaster_id(full_name, avatar_url, is_banned, country, vip_type)')
-      .eq('status', 'live')
-      .gt('last_heartbeat_at', new Date(Date.now() - 90_000).toISOString())
-      .order('current_viewers', { ascending: false })
-      .order('total_gifts', { ascending: false })
-      .range(pageOffset, pageOffset + PAGE_SIZE);
-    if (activeCategory === 'Audio') query = query.eq('type', 'audio');
-    else if (!['Trending', 'Nearby'].includes(activeCategory)) query = query.eq('tag', activeCategory);
-    const { data, error } = await query;
-    if (error) throw error;
-    const rows = data || [];
-    setLiveHasMore(rows.length > PAGE_SIZE);
-    const nextStreams = rows.slice(0, PAGE_SIZE).filter((item) => !item.profiles?.is_banned).map((item) => ({
+    const allRows = [];
+    let offset = 0;
+    while (true) {
+      let query = supabase.from('live_streams')
+        .select('id, broadcaster_id, type, title, tag, cover_url, current_viewers, peak_viewers, total_gifts, last_heartbeat_at, pinned_position, profiles:broadcaster_id(full_name, avatar_url, is_banned, country, vip_type)')
+        .eq('status', 'live')
+        .gt('last_heartbeat_at', new Date(Date.now() - 120_000).toISOString())
+        // Admin-pinned rooms lead the feed in their chosen order; everything
+        // else keeps the previous viewer/gift ranking behind them.
+        .order('pinned_position', { ascending: true, nullsFirst: false })
+        .order('current_viewers', { ascending: false })
+        .order('total_gifts', { ascending: false })
+        .range(offset, offset + PAGE_SIZE - 1);
+      if (activeCategory === 'Audio') query = query.eq('type', 'audio');
+      else if (!['Trending', 'Nearby'].includes(activeCategory)) query = query.eq('tag', activeCategory);
+      const { data, error } = await query;
+      if (error) throw error;
+      const rows = data || [];
+      allRows.push(...rows);
+      if (rows.length < PAGE_SIZE) break;
+      offset += PAGE_SIZE;
+    }
+    const nextStreams = allRows.filter((item) => !item.profiles?.is_banned && (!showNearby || !user?.country || item.profiles?.country === user.country)).map((item) => ({
       id: item.broadcaster_id,
       streamId: item.id,
       title: item.title,
@@ -498,8 +515,8 @@ export default function PremiumHomeScreen() {
       streamType: item.type,
       country: item.profiles?.country,
     }));
-    setLiveStreams((current) => reset ? nextStreams : [...current, ...nextStreams]);
-  }, [activeCategory]);
+    setLiveStreams(Array.from(new Map(nextStreams.map((item) => [item.streamId, item])).values()));
+  }, [activeCategory, showNearby, user?.country]);
 
   const fetchNearbyHosts = useCallback(async ({ reset = false, offset = 0 } = {}) => {
     const pageOffset = reset ? 0 : offset;
@@ -541,11 +558,8 @@ export default function PremiumHomeScreen() {
 
   const fetchAll = useCallback(async () => {
     if (isGaming) return;
-    await Promise.all([
-      fetchLiveStreams({ reset: true }),
-      showNearby ? fetchNearbyHosts({ reset: true }) : fetchHosts({ reset: true }),
-    ]);
-  }, [fetchHosts, fetchLiveStreams, fetchNearbyHosts, isGaming, showNearby]);
+    await fetchLiveStreams();
+  }, [fetchLiveStreams, isGaming]);
 
   useEffect(() => {
     setLoading(true);
@@ -556,7 +570,7 @@ export default function PremiumHomeScreen() {
   useEffect(() => { liveFetchRef.current = fetchLiveStreams; }, [fetchLiveStreams]);
   useEffect(() => {
     const channel = supabase.channel(`premium-home-live-${Date.now()}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'live_streams' }, () => liveFetchRef.current?.({ reset: true }))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'live_streams' }, () => liveFetchRef.current?.())
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, []);
@@ -565,12 +579,6 @@ export default function PremiumHomeScreen() {
     setRefreshing(true);
     await fetchAll();
     setRefreshing(false);
-  };
-
-  const loadMoreLive = async () => {
-    if (loadingMoreLive || !liveHasMore) return;
-    setLoadingMoreLive(true);
-    await fetchLiveStreams({ offset: liveStreams.length }).finally(() => setLoadingMoreLive(false));
   };
 
   const loadMoreHosts = async () => {
@@ -584,16 +592,14 @@ export default function PremiumHomeScreen() {
     pathname: `/broadcast/${stream.id}`,
     params: {
       type: stream.streamType,
+      streamId: stream.streamId,
       siblings: liveStreams.map((item) => item.id).join(','),
       myIdx: String(index),
+      feedTag: !['Trending', 'Nearby', 'Audio'].includes(activeCategory) ? activeCategory : '',
+      feedType: activeCategory === 'Audio' ? 'audio' : '',
+      feedCountry: showNearby ? (user?.country || '') : '',
     },
   });
-
-  const openHero = (slide) => {
-    if (slide.linkUrl) router.push(slide.linkUrl);
-    else if (liveStreams[0]) openStream(liveStreams[0], 0);
-    else router.push('/main/(tabs)/live');
-  };
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -611,7 +617,7 @@ export default function PremiumHomeScreen() {
           onNotifications={() => router.push('/main/notifications')}
         />
         <CategoryTabs active={activeCategory} onChange={setActiveCategory} />
-        <ImageCarousel banners={topBanners} width={width} onPress={openHero} />
+        <ImageCarousel banners={topBanners} width={width} />
 
         <View style={styles.quickRow}>
           {QUICK_ACTIONS.map((item) => <QuickActionCard key={item.key} item={item} onPress={() => router.push(item.route)} />)}
@@ -655,7 +661,13 @@ export default function PremiumHomeScreen() {
                     />
                   )}
                 />
-                {liveRest.length ? <ImageCarousel banners={eventBanners} width={width} onPress={openHero} compact reverseFallback /> : null}
+                {eventBanners.length ? (
+                  // Second banner slot. Rendered with the same carousel as the
+                  // top banner so both are identical in size and style; it used
+                  // to be a "Top Events" card row that only showed the uploaded
+                  // image dimmed behind a gradient and placeholder event text.
+                  <ImageCarousel banners={eventBanners} width={width} />
+                ) : null}
                 {liveRest.length ? (
                   <TwoColumnGrid
                     items={liveRest}
@@ -665,12 +677,11 @@ export default function PremiumHomeScreen() {
                         key={item.streamId}
                         stream={item}
                         style={styles.gridCard}
-                        onPress={() => openStream(item, index + 4)}
+                      onPress={() => openStream(item, index + 2)}
                       />
                     )}
                   />
                 ) : null}
-                {liveHasMore ? <ShowMoreButton loading={loadingMoreLive} onPress={loadMoreLive} /> : null}
               </>
             ) : (
               <EmptySection
@@ -680,73 +691,6 @@ export default function PremiumHomeScreen() {
                 action="Go Live"
                 actionIcon="videocam"
                 onPress={() => router.push('/main/(tabs)/live')}
-              />
-            )}
-
-            {!loading && (hostList.length ? (
-              <>
-                <TwoColumnGrid
-                  items={liveStreams.length ? hostList : hostFirstPage}
-                  style={styles.hostGridNoHeader}
-                  renderItem={(item, index) => (
-                    <HostProfileCard
-                      key={item.id}
-                      host={item}
-                      index={index}
-                      nearby={showNearby}
-                      style={styles.gridCard}
-                      onPress={() => router.push(`/main/user/${item.id}`)}
-                    />
-                  )}
-                />
-                {!liveStreams.length && hostFirstPage.length >= 4 ? (
-                  <ImageCarousel banners={eventBanners} width={width} onPress={openHero} compact reverseFallback />
-                ) : null}
-                {!liveStreams.length && hostRest.length ? (
-                  <TwoColumnGrid
-                    items={hostRest}
-                    style={styles.gridAfterCarousel}
-                    renderItem={(item, index) => (
-                      <HostProfileCard
-                        key={item.id}
-                        host={item}
-                        index={index + 4}
-                        nearby={showNearby}
-                        style={styles.gridCard}
-                        onPress={() => router.push(`/main/user/${item.id}`)}
-                      />
-                    )}
-                  />
-                ) : null}
-                {hostHasMore ? <ShowMoreButton loading={loadingMoreHosts} onPress={loadMoreHosts} /> : null}
-              </>
-            ) : (
-              <EmptySection
-                background={showNearby ? EMPTY_BACKGROUNDS.nearby : EMPTY_BACKGROUNDS.live}
-                title={showNearby ? 'No nearby hosts' : 'No hosts to show'}
-                subtitle={showNearby ? 'Try again later or explore other categories.' : 'Profiles will appear here when hosts are available.'}
-                action="Explore"
-                onPress={() => router.push('/main/(tabs)/explore')}
-              />
-            ))}
-
-            <SectionHeader asset={SECTION_ICONS.events} title="Top Events" onViewAll={() => router.push('/main/(tabs)/explore')} />
-            {eventBanners.length ? (
-              <FlatList
-                horizontal
-                data={eventBanners}
-                keyExtractor={(item) => item.id}
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.horizontalRow}
-                renderItem={({ item, index }) => <EventCard event={item} index={index} onPress={() => item.link_url && router.push(item.link_url)} />}
-              />
-            ) : (
-              <EmptySection
-                background={EMPTY_BACKGROUNDS.events}
-                title="No events at the moment"
-                subtitle="Check back soon for exciting events and competitions!"
-                action="Explore Events"
-                onPress={() => router.push('/main/(tabs)/explore')}
               />
             )}
           </>
@@ -763,6 +707,7 @@ const styles = StyleSheet.create({
     height: 76, paddingHorizontal: 18, flexDirection: 'row',
     alignItems: 'center', justifyContent: 'space-between',
   },
+  headerProfileGroup: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', marginRight: 8 },
   avatarTouch: { width: 62, height: 62, alignItems: 'center', justifyContent: 'center' },
   avatarRing: { width: 48, height: 48, borderRadius: 24, padding: 2.5 },
   headerAvatar: { width: '100%', height: '100%', borderRadius: 24, backgroundColor: '#17133F' },
@@ -773,6 +718,11 @@ const styles = StyleSheet.create({
   },
   crownBubble: { position: 'absolute', right: -9, top: -6, transform: [{ rotate: '13deg' }] },
   crownText: { color: '#FFD64A', fontSize: 17, fontWeight: '900', textShadowColor: '#FF9B19', textShadowRadius: 5 },
+  headerProfileCopy: { flex: 1, minWidth: 0, marginLeft: 7, justifyContent: 'center' },
+  headerNameRow: { flexDirection: 'row', alignItems: 'center', gap: 5, minWidth: 0 },
+  headerName: { flexShrink: 1, color: '#FFFFFF', fontSize: 15, fontWeight: '900' },
+  headerMeta: { color: '#C7C3E3', fontSize: 10.5, fontWeight: '600', marginTop: 2 },
+  headerNickname: { color: '#C895FF', fontSize: 10, fontWeight: '800', marginTop: 1 },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 15 },
   headerIcon: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   notifBadge: {
@@ -795,10 +745,10 @@ const styles = StyleSheet.create({
   categoryText: { color: '#DAD8F7', fontSize: 14, fontWeight: '600' },
   categoryTextActive: { color: '#FFF', fontWeight: '800' },
   heroShell: { marginTop: 11, marginHorizontal: 16, borderRadius: 23, overflow: 'hidden', borderWidth: 1.2, borderColor: '#8739FF' },
-  heroCard: { height: 142 },
+  heroCard: { aspectRatio: 2.3 },
   carouselImage: { width: '100%', height: '100%', backgroundColor: '#0A083A' },
   secondaryCarousel: { marginTop: 24, borderRadius: 19, borderColor: 'rgba(111,87,255,.72)' },
-  secondarySlide: { height: 142 },
+  secondarySlide: { aspectRatio: 2.3 },
   heroOverlay: { flex: 1, padding: 18, justifyContent: 'center' },
   heroGlowOrb: {
     position: 'absolute', width: 190, height: 190, borderRadius: 95, right: -30, top: -35,
@@ -909,6 +859,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,.28)',
   },
   gameEmoji: { fontSize: 30 },
+  gameIconImage: { width: 54, height: 54, borderRadius: 15 },
   gameWatermark: { position: 'absolute', right: 12, top: 20, transform: [{ rotate: '-10deg' }] },
   gameCardCopy: { flex: 1, justifyContent: 'flex-end', paddingBottom: 10 },
   gameCardTitle: { color: '#FFFFFF', fontSize: 16, fontWeight: '900' },
@@ -942,8 +893,12 @@ const styles = StyleSheet.create({
   },
   liveCover: { width: '100%', height: '100%' },
   liveShade: { ...StyleSheet.absoluteFillObject, top: '38%' },
-  cardLivePill: { position: 'absolute', top: 8, left: 8, backgroundColor: '#F42472', borderRadius: 6, paddingHorizontal: 7, paddingVertical: 3 },
+  cardBadgeRow: { position: 'absolute', top: 8, left: 8, flexDirection: 'row', alignItems: 'center', gap: 4 },
+  cardLivePill: { backgroundColor: '#F42472', borderRadius: 6, paddingHorizontal: 7, paddingVertical: 3 },
   cardLiveText: { color: '#FFF', fontSize: 10, fontWeight: '900' },
+  cardTypePill: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: 'rgba(37,99,235,.92)', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 3 },
+  cardTypePillAudio: { backgroundColor: 'rgba(139,92,246,.94)' },
+  cardTypeText: { color: '#FFF', fontSize: 8.5, fontWeight: '900' },
   viewerPill: { position: 'absolute', top: 8, right: 7, flexDirection: 'row', gap: 4, alignItems: 'center', backgroundColor: 'rgba(10,8,36,.72)', borderRadius: 9, paddingHorizontal: 6, paddingVertical: 3 },
   viewerText: { color: '#FFF', fontSize: 10, fontWeight: '700' },
   liveCardCopy: { position: 'absolute', left: 10, right: 8, bottom: 9 },

@@ -23,26 +23,21 @@ const TENANT_CONFIG = {
   // ============================================================
   // 1. IDENTITY — Play Store + OS-level
   // ============================================================
-  appName:   'Care Live',                  // Title under the launcher icon
-  shortName: 'Care Live',                  // Short version used in tight UI
-  bundleId:  'com.carelive.app',           // Android applicationId / iOS bundle id — MUST be globally unique on the store
-  scheme:    'care-live',                  // Deep-link scheme (care-live://path)
-  slug:      'care-live',                  // Expo project slug — must match the linked EAS project. Display name comes from `appName`.
+  appName:   'Popular Live',               // Title under the launcher icon
+  shortName: 'Popular Live',               // Short version used in tight UI
+  bundleId:  'com.greenlive.app',          // Android applicationId / iOS bundle id — MUST be globally unique on the store
+  scheme:    'green-live',                 // Deep-link scheme (green-live://path)
+  slug:      'green-live',                 // Expo project slug — must match the linked EAS project. Display name comes from `appName`.
   owner:     'yoloteam',                   // EAS organisation/team account
 
   // ============================================================
   // 2. BRANDING — colours + share-link text
   // ============================================================
-  // Care Live palette — Senior-visualisation pick from the brand
-  // colour board. The primary→alt gradient (deep blue → cyan) reads
-  // as "trust + freshness" on a dark surface, matching the "care"
-  // identity without going saccharine. Accents (purple/yellow/etc.)
-  // live in src/theme/brand.js for situational use (VVIP tier,
-  // coin pills, light surfaces).
-  primaryColor:   '#1163C6',               // Blue — primary CTAs, brand anchor
-  primaryAlt:     '#20C8C8',               // Cyan — gradient companion
-  splashBg:       '#112E93',               // Dark blue — splash / dark surfaces
-  successColor:   '#8DEB53',               // Green — claim ticks, success states
+  // Existing product palette. Identity assets and display copy use Popular Live.
+  primaryColor:   '#36B911',               // Green — primary CTAs, brand anchor
+  primaryAlt:     '#19D6DB',               // Cyan — gradient companion
+  splashBg:       '#061226',               // Deep navy — splash / dark surfaces
+  successColor:   '#B5F600',               // Lime — claim ticks, success states
   warningColor:   '#FFA33A',               // Orange — caution / warning pills
   errorColor:     '#EC38C9',               // Magenta — error states (on-brand vs. generic red)
 

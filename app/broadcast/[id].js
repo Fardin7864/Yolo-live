@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { View, Text, StyleSheet, Image, TouchableOpacity, FlatList, TextInput, Platform, Dimensions, Modal, Alert, Keyboard, Animated, Easing, ScrollView, StatusBar, BackHandler, PanResponder, AppState } from 'react-native';
+import { View, Text, StyleSheet, Image, TouchableOpacity, FlatList, TextInput, Platform, Dimensions, Modal, Alert, Keyboard, Animated, Easing, ScrollView, StatusBar, BackHandler, PanResponder, AppState, useWindowDimensions } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { KeyboardEvents } from 'react-native-keyboard-controller';
+import { KeyboardEvents, KeyboardStickyView } from 'react-native-keyboard-controller';
 import { showCuteAlert, confirmCuteAlert } from '../../src/components/CuteAlert';
 import { Ionicons } from '@expo/vector-icons';
 import { useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
@@ -11,15 +11,13 @@ import * as Linking from 'expo-linking';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Audio from 'expo-audio';
 import * as MediaLibrary from 'expo-media-library';
+import * as ScreenCapture from 'expo-screen-capture';
 import { VideoView } from 'expo-video';
 import LottieView from 'lottie-react-native';
 import VipAvatar from '../../src/components/VipAvatar';
-import { usePreventScreenCapture } from 'expo-screen-capture';
 import { useKeepAwake } from 'expo-keep-awake';
-import FruitRoulette from '../../src/components/games/FruitRoulette';
-import TeenPatti from '../../src/components/games/TeenPatti';
-import GreedyLion from '../../src/components/games/GreedyLion';
-import TinPattiPro from '../../src/components/games/TinPattiPro';
+import ErrorBoundary from '../../src/components/ErrorBoundary';
+import GameWebView from '../../src/game-platform/GameWebView';
 import AudioTemplateSheet from '../../src/components/audio/AudioTemplateSheet';
 import { useGlobalState } from '../../src/context/GlobalStateContext';
 import { resolveGiftAnimation } from '../../src/theme/giftAnimations';
@@ -31,33 +29,57 @@ import { useAgoraEngine } from '../../src/hooks/useAgoraEngine';
 import { agoraUidFromId } from '../../src/api/agora';
 import { BRAND } from '../../src/theme/brand';
 import { useOneShotIntroPlayer } from '../../src/hooks/useOneShotIntroPlayer';
+import {
+  assignedIntroFromProfile,
+  resolveAssignedIntroFromPackageCatalogs,
+} from '../../src/hooks/introPlaybackPolicy';
+import { createClientRequestUuid, luckyBagExpiryDelayMs } from '../../src/hooks/mobileIntegrationPolicy';
+import { resizeAudioGuestSeats, shouldApplyRealtimeRevision } from '../../src/live/audioRoomSync';
 import { flagFor } from '../../src/utils/countryFlag';
+import {
+  LIVE_ANNOUNCEMENT_DISPLAY_MS,
+  LIVE_ANNOUNCEMENT_THRESHOLDS,
+  appendLiveAnnouncementFifo,
+  luckyBagBelongsToLive,
+  normalizeGlobalLuckyBag,
+  publishGlobalLiveAnnouncement,
+  subscribeGlobalLiveAnnouncements,
+} from '../../src/api/liveAnnouncements';
+import { announcementFrameFor, botProfileFor, stableAssetIndex } from '../../src/theme/announcementAssets';
 
 const { width, height } = Dimensions.get('screen');
 const AgoraVideoView = Platform.OS === 'android' ? RtcTextureView : RtcSurfaceView;
 const MALL_INTRO_MAX_HEIGHT = height * 0.92;
 const MALL_INTRO_WIDTH = width;
+const HOST_BACKGROUND_TIMEOUT_MS = 2 * 60 * 1000;
 
 // ─────────────────────────────────────────────────────────────────────
 // Lucky Bag asset
 // ─────────────────────────────────────────────────────────────────────
-// One-line swap path for the burlap-sack image. Drop your bag PNG/SVG
-// into  assets/images/lucky-bag.png  and replace the `null` on the next
-// line with the require() literal commented below. The render path
-// already branches on this value, so no other edit is needed.
-//
-//   const LUCKY_BAG_IMAGE = require('../../assets/images/lucky-bag.png');
-//
-// While this is null we render a stylised emoji fallback that still
-// looks like a sack (drawstring + body shading), so the feature ships
-// before the asset is in place.
-const LUCKY_BAG_IMAGE = null;
+// Transparent, app-optimized 3D asset for the redesigned Lucky Bag.
+// The code fallback remains below for resilience if Metro cannot resolve it.
+const LUCKY_BAG_IMAGE = require('../../assets/images/lucky-bag.png');
 const AUDIO_ROOM_BACKGROUND = require('../../assets/audio-room/redesign/cosmic-background.webp');
 const AUDIO_SEAT_FRAME = require('../../assets/audio-room/redesign/seat.webp');
-const AUDIO_BACK_BUTTON = require('../../assets/audio-room/redesign/back.webp');
-const AUDIO_MORE_BUTTON = require('../../assets/audio-room/redesign/more.webp');
+const AUDIO_CLOSE_BUTTON = require('../../assets/live-setup/close-button.webp');
 const AUDIO_SVIP_BADGE = require('../../assets/audio-room/redesign/svip.webp');
 const AUDIO_HOST_BANNER_BG = require('../../assets/audio-room/redesign/host-banner.webp');
+const CHAT_MEMBERSHIP_FRAMES = {
+  VIP: require('../../assets/chat-identity/vip-membership.png'),
+  VVIP: require('../../assets/chat-identity/vvip-membership.png'),
+  SVIP: require('../../assets/chat-identity/svip-membership.png'),
+};
+const CHAT_LEVEL_FRAMES = {
+  normal: require('../../assets/chat-identity/normal-level.png'),
+  VIP: require('../../assets/chat-identity/vip-level.png'),
+  VVIP: require('../../assets/chat-identity/vvip-level.png'),
+  SVIP: require('../../assets/chat-identity/svip-level.png'),
+};
+const CHAT_NAME_FRAMES = {
+  VIP: require('../../assets/chat-identity/vip-name.png'),
+  VVIP: require('../../assets/chat-identity/vvip-name.png'),
+  SVIP: require('../../assets/chat-identity/svip-name.png'),
+};
 const PROFILE_FRAME_ASSETS = {
   'heart-fantasy': require('../../assets/mall/frames/heart-fantasy.webp'),
   'angel-wing': require('../../assets/mall/frames/angel-wing.webp'),
@@ -79,43 +101,57 @@ const AUDIO_SEAT_PULSE_SIZE = 70 * AUDIO_SEAT_SCALE;
 const GamesBottomSheet = React.memo(function GamesBottomSheet({
   gameMenuState,
   setGameMenuState,
-  insetsTop,
   insetsBottom,
-  roomId,
-  myDiamonds,
-  setMyDiamonds,
-  fruitActive,
-  teenPattiActive,
   greedyLionActive,
+  greedyProActive,
   tinPattiProActive,
+  luckyDiceActive,
+  crashActive,
+  onGameWin,
+  notificationBanner,
 }) {
+  const { width: viewportWidth, height: viewportHeight } = useWindowDimensions();
   const closeGames = useCallback(() => setGameMenuState(null), [setGameMenuState]);
   const backToMenu = useCallback(() => setGameMenuState('menu'), [setGameMenuState]);
-  const openFruit = useCallback(() => setGameMenuState('fruit'), [setGameMenuState]);
-  const openTeenPatti = useCallback(() => setGameMenuState('teenpatti'), [setGameMenuState]);
   const openGreedyLion = useCallback(() => setGameMenuState('greedylion'), [setGameMenuState]);
+  const openGreedyPro = useCallback(() => setGameMenuState('greedypro'), [setGameMenuState]);
   const openTinPattiPro = useCallback(() => setGameMenuState('tinpattipro'), [setGameMenuState]);
+  const openLuckyDice = useCallback(() => setGameMenuState('luckydice'), [setGameMenuState]);
+  const openCrash = useCallback(() => setGameMenuState('crash'), [setGameMenuState]);
 
   const menuHeight = Math.min(620, Math.round(height * 0.72));
-  const greedyLionHeight = Math.min(760, height - insetsTop - 12);
+  // A fixed percentage of screen height makes the game panel too shallow on
+  // tablets and other wide displays. Keep enough height for the 540-wide game
+  // canvas so its wheel, circular items, chips and history retain the same
+  // proportions on every device. The viewport cap still leaves a small amount
+  // of the live visible and protects the top system safe area.
+  const responsiveGameHeight = Math.min(
+    Math.round(viewportHeight * 0.92),
+    Math.max(
+      Math.round(viewportHeight * 0.55),
+      Math.round(viewportWidth * 1.18 + insetsBottom),
+    ),
+  );
   const gameSheetHeight = gameMenuState === 'menu'
     ? menuHeight
-    : gameMenuState === 'greedylion' || gameMenuState === 'tinpattipro'
-      ? greedyLionHeight
+    : gameMenuState === 'greedylion' || gameMenuState === 'greedypro' || gameMenuState === 'tinpattipro' || gameMenuState === 'luckydice' || gameMenuState === 'crash'
+      ? responsiveGameHeight
       : 'auto';
+  const gameOpen = gameMenuState === 'tinpattipro' || gameMenuState === 'greedylion' || gameMenuState === 'greedypro' || gameMenuState === 'luckydice' || gameMenuState === 'crash';
 
   return (
     <Modal animationType="slide" transparent={true} visible={gameMenuState !== null} onRequestClose={closeGames}>
       <View style={styles.giftModalOverlay}>
-        <View style={[styles.giftModalContent, { paddingBottom: insetsBottom + 20, height: gameSheetHeight }]}>
+        <View style={[styles.giftModalContent, {
+          paddingTop: gameOpen ? 0 : 6,
+          paddingBottom: gameOpen ? insetsBottom : insetsBottom + 20,
+          height: gameSheetHeight,
+        }]}>
 
           {gameMenuState === 'menu' && (
             <View style={{ flex: 1 }}>
               <View style={styles.gamePickerHeader}>
-                <View>
-                  <Text style={styles.gamePickerTitle}>Mini Games</Text>
-                  <Text style={styles.gamePickerSubtitle}>Bet together — one shared round per game</Text>
-                </View>
+                <Text style={styles.gamePickerTitle}>Mini Games</Text>
                 <TouchableOpacity onPress={closeGames} style={styles.gamePickerClose}>
                   <Ionicons name="close" size={18} color="rgba(255,255,255,0.7)" />
                 </TouchableOpacity>
@@ -125,52 +161,6 @@ const GamesBottomSheet = React.memo(function GamesBottomSheet({
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={styles.gameTileGrid}
               >
-                {fruitActive && (
-                  <TouchableOpacity
-                    style={styles.gameTile}
-                    activeOpacity={0.85}
-                    onPress={openFruit}
-                  >
-                    <LinearGradient
-                      colors={['rgba(251,191,36,0.18)', 'rgba(244,114,182,0.10)']}
-                      style={styles.gameTileGrad}
-                    >
-                      <View style={styles.gameTileIconWrap}>
-                        <Text style={styles.gameTileEmoji}>🎰</Text>
-                      </View>
-                      <Text style={styles.gameTileName} numberOfLines={1}>Fruit Roulette</Text>
-                      <Text style={styles.gameTileDesc} numberOfLines={2}>Pick a fruit. Win up to 8×.</Text>
-                      <View style={styles.gameTileChip}>
-                        <Ionicons name="people-outline" size={10} color="#FBBF24" />
-                        <Text style={styles.gameTileChipText}>Multiplayer</Text>
-                      </View>
-                    </LinearGradient>
-                  </TouchableOpacity>
-                )}
-
-                {teenPattiActive && (
-                  <TouchableOpacity
-                    style={styles.gameTile}
-                    activeOpacity={0.85}
-                    onPress={openTeenPatti}
-                  >
-                    <LinearGradient
-                      colors={['rgba(6,182,212,0.18)', 'rgba(217,70,239,0.10)']}
-                      style={styles.gameTileGrad}
-                    >
-                      <View style={styles.gameTileIconWrap}>
-                        <Text style={styles.gameTileEmoji}>🃏</Text>
-                      </View>
-                      <Text style={styles.gameTileName} numberOfLines={1}>Teen Patti</Text>
-                      <Text style={styles.gameTileDesc} numberOfLines={2}>Bet on A, B or C. Winner pays 2×.</Text>
-                      <View style={styles.gameTileChip}>
-                        <Ionicons name="people-outline" size={10} color="#06B6D4" />
-                        <Text style={[styles.gameTileChipText, { color: '#06B6D4' }]}>Multiplayer</Text>
-                      </View>
-                    </LinearGradient>
-                  </TouchableOpacity>
-                )}
-
                 {greedyLionActive && (
                   <TouchableOpacity
                     style={styles.gameTile}
@@ -182,14 +172,20 @@ const GamesBottomSheet = React.memo(function GamesBottomSheet({
                       style={styles.gameTileGrad}
                     >
                       <View style={styles.gameTileIconWrap}>
-                        <Text style={styles.gameTileEmoji}>🦁</Text>
+                        <Image source={require('../../assets/games/greedy-lion/icon.webp')} style={styles.gameTileIconImage} />
                       </View>
-                      <Text style={styles.gameTileName} numberOfLines={1}>Greedy Lion</Text>
-                      <Text style={styles.gameTileDesc} numberOfLines={2}>Pick up to 6 foods. Pizza or Salad wins.</Text>
-                      <View style={styles.gameTileChip}>
-                        <Ionicons name="people-outline" size={10} color="#F5C76A" />
-                        <Text style={[styles.gameTileChipText, { color: '#F5C76A' }]}>Native</Text>
+                      <Text style={styles.gameTileName} numberOfLines={2}>Populer Greedy</Text>
+                    </LinearGradient>
+                  </TouchableOpacity>
+                )}
+
+                {greedyProActive && (
+                  <TouchableOpacity style={styles.gameTile} activeOpacity={0.85} onPress={openGreedyPro}>
+                    <LinearGradient colors={['rgba(255,216,61,0.28)', 'rgba(213,17,58,0.22)']} style={styles.gameTileGrad}>
+                      <View style={styles.gameTileIconWrap}>
+                        <Image source={require('../../assets/games/greedy-pro/icon.webp')} style={styles.gameTileIconImage} />
                       </View>
+                      <Text style={styles.gameTileName} numberOfLines={2}>Greedy King</Text>
                     </LinearGradient>
                   </TouchableOpacity>
                 )}
@@ -205,19 +201,36 @@ const GamesBottomSheet = React.memo(function GamesBottomSheet({
                       style={styles.gameTileGrad}
                     >
                       <View style={styles.gameTileIconWrap}>
-                        <Text style={styles.gameTileEmoji}>TP</Text>
+                        <Image source={require('../../assets/games/tin-patti-pro/icon.webp')} style={styles.gameTileIconImage} />
                       </View>
-                      <Text style={styles.gameTileName} numberOfLines={1}>Tin Patti Pro</Text>
-                      <Text style={styles.gameTileDesc} numberOfLines={2}>One global card table for everyone.</Text>
-                      <View style={styles.gameTileChip}>
-                        <Ionicons name="people-outline" size={10} color="#F5C76A" />
-                        <Text style={[styles.gameTileChipText, { color: '#F5C76A' }]}>Global</Text>
-                      </View>
+                      <Text style={styles.gameTileName} numberOfLines={2}>Tin Patti Pro</Text>
                     </LinearGradient>
                   </TouchableOpacity>
                 )}
 
-                {!fruitActive && !teenPattiActive && !greedyLionActive && !tinPattiProActive && (
+                {luckyDiceActive && (
+                  <TouchableOpacity style={styles.gameTile} activeOpacity={0.85} onPress={openLuckyDice}>
+                    <LinearGradient colors={['rgba(224,179,78,0.24)', 'rgba(11,91,58,0.22)']} style={styles.gameTileGrad}>
+                      <View style={styles.gameTileIconWrap}>
+                        <Image source={require('../../assets/games/lucky-dice/icon.webp')} style={styles.gameTileIconImage} />
+                      </View>
+                      <Text style={styles.gameTileName} numberOfLines={2}>Lucky Dice Royale</Text>
+                    </LinearGradient>
+                  </TouchableOpacity>
+                )}
+
+                {crashActive && (
+                  <TouchableOpacity style={styles.gameTile} activeOpacity={0.85} onPress={openCrash}>
+                    <LinearGradient colors={['rgba(89,66,214,0.32)', 'rgba(226,82,114,0.20)']} style={styles.gameTileGrad}>
+                      <View style={styles.gameTileIconWrap}>
+                        <Image source={require('../../assets/games/crash/icon.webp')} style={styles.gameTileIconImage} />
+                      </View>
+                      <Text style={styles.gameTileName} numberOfLines={2}>Crash</Text>
+                    </LinearGradient>
+                  </TouchableOpacity>
+                )}
+
+                {!greedyLionActive && !greedyProActive && !tinPattiProActive && !luckyDiceActive && !crashActive && (
                   <View style={styles.gameTileEmpty}>
                     <Ionicons name="game-controller-outline" size={44} color="rgba(255,255,255,0.2)" />
                     <Text style={styles.gameTileEmptyText}>
@@ -229,45 +242,75 @@ const GamesBottomSheet = React.memo(function GamesBottomSheet({
             </View>
           )}
 
-          {gameMenuState === 'fruit' && (
-            <FruitRoulette
-              roomId={roomId}
-              myDiamonds={myDiamonds}
-              setMyDiamonds={setMyDiamonds}
-              onBack={backToMenu}
-              onClose={closeGames}
-            />
-          )}
-
-          {gameMenuState === 'teenpatti' && (
-            <TeenPatti
-              roomId={roomId}
-              myDiamonds={myDiamonds}
-              setMyDiamonds={setMyDiamonds}
-              onBack={backToMenu}
-              onClose={closeGames}
-            />
-          )}
-
           {gameMenuState === 'greedylion' && (
-            <GreedyLion
-              myDiamonds={myDiamonds}
-              setMyDiamonds={setMyDiamonds}
-              onBack={backToMenu}
-              onClose={closeGames}
-            />
+            <ErrorBoundary name="Populer Greedy WebView">
+              <View style={styles.liveGameCanvas}>
+                <GameWebView gameId="greedy_lion" onExit={backToMenu} onGameWin={onGameWin} fillContainer />
+                <TouchableOpacity
+                  accessibilityLabel="Back to games"
+                  style={styles.liveGameFloatingBack}
+                  onPress={backToMenu}
+                >
+                  <Ionicons name="close" size={19} color="#FFFFFF" />
+                </TouchableOpacity>
+              </View>
+            </ErrorBoundary>
+          )}
+
+          {gameMenuState === 'greedypro' && (
+            <ErrorBoundary name="Greedy King WebView">
+              <View style={styles.liveGameCanvas}>
+                <GameWebView gameId="greedy_pro" onExit={backToMenu} onGameWin={onGameWin} fillContainer />
+                <TouchableOpacity
+                  accessibilityLabel="Back to games"
+                  style={styles.liveGameFloatingBack}
+                  onPress={backToMenu}
+                >
+                  <Ionicons name="close" size={19} color="#FFFFFF" />
+                </TouchableOpacity>
+              </View>
+            </ErrorBoundary>
           )}
 
           {gameMenuState === 'tinpattipro' && (
-            <TinPattiPro
-              myDiamonds={myDiamonds}
-              setMyDiamonds={setMyDiamonds}
-              onBack={backToMenu}
-              onClose={closeGames}
-            />
+            <ErrorBoundary name="Teen Patti Pro WebView">
+              <View style={styles.liveGameCanvas}>
+                <GameWebView gameId="tin_patti_pro" onExit={backToMenu} onGameWin={onGameWin} fillContainer />
+                <TouchableOpacity
+                  accessibilityLabel="Back to games"
+                  style={[styles.liveGameFloatingBack, styles.liveGameFloatingBackTeen]}
+                  onPress={backToMenu}
+                >
+                  <Ionicons name="close" size={19} color="#FFFFFF" />
+                </TouchableOpacity>
+              </View>
+            </ErrorBoundary>
+          )}
+
+          {gameMenuState === 'luckydice' && (
+            <ErrorBoundary name="Lucky Dice Royale WebView">
+              <View style={styles.liveGameCanvas}>
+                <GameWebView gameId="lucky_dice" onExit={backToMenu} onGameWin={onGameWin} fillContainer />
+                <TouchableOpacity accessibilityLabel="Back to games" style={styles.liveGameFloatingBack} onPress={backToMenu}>
+                  <Ionicons name="close" size={19} color="#FFFFFF" />
+                </TouchableOpacity>
+              </View>
+            </ErrorBoundary>
+          )}
+
+          {gameMenuState === 'crash' && (
+            <ErrorBoundary name="Crash WebView">
+              <View style={styles.liveGameCanvas}>
+                <GameWebView gameId="crash" onExit={backToMenu} onGameWin={onGameWin} fillContainer />
+                <TouchableOpacity accessibilityLabel="Back to games" style={styles.liveGameFloatingBack} onPress={backToMenu}>
+                  <Ionicons name="close" size={19} color="#FFFFFF" />
+                </TouchableOpacity>
+              </View>
+            </ErrorBoundary>
           )}
 
         </View>
+        {notificationBanner}
       </View>
     </Modal>
   );
@@ -278,6 +321,105 @@ const mallIntroMediaSource = (url) => {
   if (url?.startsWith?.('bundled://')) return BUNDLED_INTRO_ASSETS[url.replace('bundled://', '')];
   return url ? { uri: url } : null;
 };
+
+const BEAUTY_KNOB_R = 10;
+
+// Draggable strength control for the beauty panel. Declared at module scope on
+// purpose: defining it inside a render would create a new component type every
+// pass, remounting the PanResponder mid-drag and making the handle stutter.
+//
+// The value stays an integer 0..max because that is exactly what the Agora calls
+// consume — the slider only changes how the number is chosen, never the number.
+const BeautySlider = ({ value, max = 4, color, onChange }) => {
+  const widthRef = useRef(0);
+  const startRef = useRef(0);
+  const maxRef = useRef(max);
+  const onChangeRef = useRef(onChange);
+  const valueRef = useRef(value);
+  maxRef.current = max;
+  onChangeRef.current = onChange;
+  valueRef.current = value;
+
+  // Touches are measured on the padded outer view; the track sits BEAUTY_KNOB_R
+  // inside it so the knob stays fully on screen at 0 and at max.
+  const commit = useCallback((x) => {
+    const w = widthRef.current;
+    if (w <= 0) return;
+    const ratio = Math.max(0, Math.min(1, (x - BEAUTY_KNOB_R) / w));
+    const next = Math.round(ratio * maxRef.current);
+    if (next !== valueRef.current) onChangeRef.current(next);
+  }, []);
+
+  const responder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      // Keep the drag once it starts, so scrolling the sheet does not steal it.
+      onPanResponderTerminationRequest: () => false,
+      onPanResponderGrant: (e) => {
+        startRef.current = e.nativeEvent.locationX;
+        commit(startRef.current);
+      },
+      // Absolute coordinates drift between platforms; start + dx does not.
+      onPanResponderMove: (_e, g) => commit(startRef.current + g.dx),
+    }),
+  ).current;
+
+  const pct = max > 0 ? Math.max(0, Math.min(1, value / max)) : 0;
+
+  return (
+    <View style={styles.sliderHitArea} {...responder.panHandlers}>
+      <View
+        style={styles.sliderInner}
+        onLayout={(e) => { widthRef.current = e.nativeEvent.layout.width; }}
+      >
+        <View style={styles.sliderTrack}>
+          <View style={[styles.sliderFill, { width: `${pct * 100}%`, backgroundColor: color }]} />
+        </View>
+        <View
+          style={[
+            styles.sliderKnob,
+            { left: `${pct * 100}%`, borderColor: color },
+          ]}
+        />
+      </View>
+    </View>
+  );
+};
+
+// Icon tile used by Face shape / Background blur / Camera quality, so a filter
+// is recognisable at a glance instead of being a word on a pill.
+const FilterTile = ({ icon, label, active, color, onPress }) => (
+  <TouchableOpacity
+    style={styles.filterTile}
+    activeOpacity={0.8}
+    onPress={onPress}
+    accessibilityRole="button"
+    accessibilityState={{ selected: !!active }}
+    accessibilityLabel={label}
+  >
+    <View
+      style={[
+        styles.filterTileArt,
+        { borderColor: active ? color : 'rgba(255,255,255,0.16)' },
+        active && { backgroundColor: `${color}26` },
+      ]}
+    >
+      <Ionicons name={icon} size={24} color={active ? color : 'rgba(255,255,255,0.72)'} />
+      {active ? (
+        <View style={[styles.filterTileCheck, { backgroundColor: color }]}>
+          <Ionicons name="checkmark" size={11} color="#0B1020" />
+        </View>
+      ) : null}
+    </View>
+    <Text
+      numberOfLines={1}
+      style={[styles.filterTileLabel, active && { color, fontWeight: '700' }]}
+    >
+      {label}
+    </Text>
+  </TouchableOpacity>
+);
 
 function MallIntroOverlay({ intro, source, onDone }) {
   const { player, ready } = useOneShotIntroPlayer(source, onDone);
@@ -350,12 +492,9 @@ const formatProfileCount = (value) => {
 };
 
 export default function BroadcastRoomScreen() {
-  const { id, mode, type, title: urlTitle, tag, siblings: siblingsCsv, myIdx: myIdxStr, streamId: prewarmedStreamId } = useLocalSearchParams();
+  const { id, mode, type, title: urlTitle, tag, siblings: siblingsCsv, myIdx: myIdxStr, streamId: prewarmedStreamId, feedTag, feedType, feedCountry } = useLocalSearchParams();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-
-  // Security: Prevent Screen Capture (Screenshots/Recording)
-  usePreventScreenCapture();
 
   // Keep the screen on while the user is in the broadcast room. Applies
   // to host (so a live doesn't end when the host's screen times out),
@@ -389,6 +528,9 @@ export default function BroadcastRoomScreen() {
 
   const [chatMessage, setChatMessage] = useState('');
   const [chats, setChats] = useState([]);
+  useEffect(() => {
+    setChats([]);
+  }, [id]);
   const [isFollowing, setIsFollowing] = useState(false);
   // True for a brief window right after the viewer taps Follow — drives
   // the fading checkmark badge shown next to the host name. Once the
@@ -400,30 +542,46 @@ export default function BroadcastRoomScreen() {
   const justFollowedFadeRef  = useRef(new Animated.Value(0));
   const [showHostModal, setShowHostModal] = useState(false);
   const [isKeyboardVisible, setKeyboardVisible] = useState(false);
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
 
   // Economy & Gifts System States (Global State)
   const {
     diamonds: myDiamonds, setDiamonds: setMyDiamonds,
     beans: myBeans, setBeans: setMyBeans,
     user,
-    sendGiftSecurely, startLiveStream, endLiveStream,
+    startLiveStream, endLiveStream,
     followUser, unfollowUser, isFollowing: checkFollowing,
     gameSettings,
+    loadGameSettings,
     gifts: dbGifts,
+    vipSubscriptions,
+    svipSubscriptions,
     // Task center hooks — viewer-side watch progress + share claim
     bumpWatchProgress, claimShareTask,
     // Audio room backgrounds (mig 88)
     audioTemplates,
+    refreshUser,
+    // Super Admin switches (self-gifting toggle lives here)
+    systemSettings,
   } = useGlobalState();
+
+  // A tag may have been assigned from the dashboard while the app was
+  // already open. Refresh once when this room mounts so new comments use
+  // the current server-side identity instead of an older cached profile.
+  const refreshedCommentIdentityRef = useRef(null);
+  useEffect(() => {
+    if (!user?.id || refreshedCommentIdentityRef.current === user.id) return;
+    refreshedCommentIdentityRef.current = user.id;
+    Promise.resolve(refreshUser?.()).catch(() => {});
+  }, [user?.id, refreshUser]);
 
   // Live values from the admin panel. When an admin toggles a game off,
   // these flip to false and the matching tile vanishes from the menu
   // without an app restart.
-  const fruitActive    = gameSettings?.fruit_roulette?.is_active !== false;
-  const teenPattiActive = gameSettings?.teen_patti?.is_active     !== false;
   const greedyLionActive = gameSettings?.greedy_lion?.is_active !== false;
+  const greedyProActive = gameSettings?.greedy_pro?.is_active !== false;
   const tinPattiProActive = gameSettings?.tin_patti_pro?.is_active !== false;
+  const luckyDiceActive = gameSettings?.lucky_dice?.is_active !== false;
+  const crashActive = gameSettings?.crash?.is_active === true;
 
   // Gift catalogue, normalised from the DB into the legacy GIFT_ITEMS
   // shape the rest of this file already speaks. Falls back to the local
@@ -447,12 +605,28 @@ export default function BroadcastRoomScreen() {
       sound_url:       row.sound_url  || null,
     }));
   }, [dbGifts]);
+  // The room channel intentionally stays stable for the lifetime of the room.
+  // Keep its gift lookup current without rebuilding the channel whenever the
+  // async DB catalogue hydrates or an admin updates a gift.
+  const giftItemsRef = useRef(GIFT_ITEMS);
+  useEffect(() => {
+    giftItemsRef.current = GIFT_ITEMS;
+  }, [GIFT_ITEMS]);
 
   // Live stream DB record id (set when host starts or viewer joins)
   const [streamRecordId, setStreamRecordId] = useState(null);
   const [showGiftMenu, setShowGiftMenu] = useState(false);
   const [showTopUpModal, setShowTopUpModal] = useState(false);
   const [gameMenuState, setGameMenuState] = useState(null); // null, 'menu', 'fruit'
+
+  // Refresh discovery whenever the drawer opens. This recovers from a failed
+  // cold-start request and keeps the menu aligned with the admin switch even
+  // when the realtime subscription was briefly disconnected.
+  useEffect(() => {
+    if (gameMenuState !== 'menu') return;
+    Promise.resolve(loadGameSettings?.()).catch(() => {});
+  }, [gameMenuState, loadGameSettings]);
+
   const [activeGiftAnimation, setActiveGiftAnimation] = useState({ id: null, source: null, loop: false });
   const [activeGiftTab, setActiveGiftTab] = useState('Classic');
   const [activeMallIntro, setActiveMallIntro] = useState(null);
@@ -468,6 +642,41 @@ export default function BroadcastRoomScreen() {
     setMallIntroQueue((prev) => [...prev, intro]);
   }, []);
 
+  const resolveAssignedMallIntro = useCallback(async (introUser = {}) => {
+    const packageResolution = resolveAssignedIntroFromPackageCatalogs({
+      introId: introUser.selectedMallIntro,
+      videoUrl: introUser.selectedMallIntroVideoUrl,
+      thumbnailUrl: introUser.selectedMallIntroThumbnailUrl,
+      vipSubscriptions,
+      svipSubscriptions,
+    });
+    if (packageResolution.videoUrl || !packageResolution.introId) return packageResolution;
+
+    // Personal/admin and legacy mall assignments often have only the selected
+    // intro ID on the profile. Resolve the current media URL from the owned,
+    // RLS-visible catalog row before announcing the entrance.
+    try {
+      const { data } = await supabase
+        .from('mall_intro_items')
+        .select('id,video_url,thumbnail_url')
+        .eq('id', packageResolution.introId)
+        .maybeSingle();
+      return {
+        ...packageResolution,
+        videoUrl: data?.video_url || null,
+        thumbnailUrl: packageResolution.thumbnailUrl || data?.thumbnail_url || null,
+      };
+    } catch (_) {
+      // A source-less intro is still valid: useOneShotIntroPlayer will render
+      // the bundled fallback so a broken catalog URL cannot block the queue.
+      return packageResolution;
+    }
+  }, [svipSubscriptions, vipSubscriptions]);
+  const resolveAssignedMallIntroRef = useRef(resolveAssignedMallIntro);
+  useEffect(() => {
+    resolveAssignedMallIntroRef.current = resolveAssignedMallIntro;
+  }, [resolveAssignedMallIntro]);
+
   useEffect(() => {
     if (activeMallIntro || mallIntroQueue.length === 0) return;
     const [nextIntro, ...rest] = mallIntroQueue;
@@ -482,20 +691,27 @@ export default function BroadcastRoomScreen() {
   // Combo & Floating Toast System
   const [combo, setCombo] = useState({ active: false, count: 0, giftId: null });
   const [giftToast, setGiftToast] = useState(null);
+  const [globalLiveAnnouncement, setGlobalLiveAnnouncement] = useState(null);
+  const [globalLiveAnnouncementQueue, setGlobalLiveAnnouncementQueue] = useState([]);
   // Default recipient differs by role: viewers gift the host by default,
   // hosts can only gift their guests so we start them in "All" mode
   // (which means "all guests" when isHostView — the host tile is hidden
   // from their picker and stripped from broadcast targets).
   const [giftRecipients, setGiftRecipients] = useState(mode === 'host' ? ['all'] : ['host']);
 
-  // If the host's picker is left in a state that points at 'host' (e.g.
-  // from a deep link or a state-restoration edge case), normalise it
-  // back to 'all' so they aren't quietly stuck on "send to myself".
+  // Self-gifting is a Super Admin switch. While it is off, a host who somehow
+  // lands on 'host' (deep link, state restoration) is normalised back to 'all'
+  // so they aren't quietly stuck on "send to myself". While it is on, picking
+  // themselves is a legitimate choice and must be left alone.
+  const selfGiftingEnabled = systemSettings?.self_gifting?.enabled === true;
+  // Mirrors the server rule: self-gifted beans are parked as non-withdrawable
+  // and kept out of the room's earnings unless Super Admin says they count.
+  const selfGiftCountsTowardEarnings = systemSettings?.self_gifting?.count_toward_earnings === true;
   useEffect(() => {
-    if (mode === 'host' && giftRecipients.includes('host')) {
+    if (!selfGiftingEnabled && mode === 'host' && giftRecipients.includes('host')) {
       setGiftRecipients(['all']);
     }
-  }, [mode, giftRecipients]);
+  }, [selfGiftingEnabled, mode, giftRecipients]);
 
   // Guest Call System States
   const [callRequestStatus, setCallRequestStatus] = useState('idle'); // idle, pending, accepted
@@ -506,8 +722,18 @@ export default function BroadcastRoomScreen() {
   // Guards against repeated eject alerts when a blocked viewer is bounced
   const ejectedRef = useRef(false);
   // Latest seat layout, read by the (once-registered) presence handler
-  const activeGuestsRef = useRef([]);
+  const activeGuestsRef = useRef(new Array(7).fill(null));
+  const seatRevisionRef = useRef(0);
+  const roomStateRevisionRef = useRef(0);
   const [activeGuests, setActiveGuests] = useState(new Array(7).fill(null)); // 7 guest seats (host occupies seat 1)
+  const commitActiveGuests = useCallback((nextOrUpdater) => {
+    const next = typeof nextOrUpdater === 'function'
+      ? nextOrUpdater(activeGuestsRef.current)
+      : nextOrUpdater;
+    activeGuestsRef.current = next;
+    setActiveGuests(next);
+    return next;
+  }, []);
   const [audioSlotCount, setAudioSlotCount] = useState(8); // total audio slots, including host seat
   const [showSlotModal, setShowSlotModal] = useState(false);
   const [slotInput, setSlotInput] = useState('8');
@@ -515,7 +741,7 @@ export default function BroadcastRoomScreen() {
   const [isSeatsLocked, setIsSeatsLocked] = useState(false);
   const [lockedSeats, setLockedSeats] = useState([]); // per-seat lock (seat indices 0-6)
   const [showManageCalls, setShowManageCalls] = useState(false);
-  const [pinnedMessage, setPinnedMessage] = useState("Welcome to Care Live! 🔥 Please follow the community rules and have fun!");
+  const [pinnedMessage, setPinnedMessage] = useState("Welcome to Popular Live! 🔥 Please follow the community rules and have fun!");
   const [mutedGuests, setMutedGuests] = useState([]); // Array of guest IDs
   const [blockedUsers, setBlockedUsers] = useState([]); // Array of blocked IDs
   const [roomAdmins, setRoomAdmins] = useState([]); // Array of admin IDs
@@ -536,7 +762,7 @@ export default function BroadcastRoomScreen() {
   // a small "💎 1.2k" badge under each audio-room seat-holder's name.
   const [seatEarnings, setSeatEarnings] = useState({});
   const [showLuckyBagDrop, setShowLuckyBagDrop] = useState(false);
-  const [luckyBagPrize, setLuckyBagPrize] = useState(500);
+  const [luckyBagPrize, setLuckyBagPrize] = useState(5000);
   const [luckyBagWinners, setLuckyBagWinners] = useState(5);
   // activeLuckyBag now carries the full reveal payload:
   //   { id, perWinner, winners, droppedBy, dropperName, dropAt (ISO),
@@ -545,6 +771,23 @@ export default function BroadcastRoomScreen() {
   // and posX/posY randomise where the bag lands so viewers can't
   // pre-position their thumb on a fixed spot.
   const [activeLuckyBag, setActiveLuckyBag] = useState(null);
+  const luckyBagExpiryTimersRef = useRef(new Map());
+  const scheduleLuckyBagExpiry = useCallback((bagId, expiryOrDelay) => {
+    if (!bagId) return;
+    const key = String(bagId);
+    const existing = luckyBagExpiryTimersRef.current.get(key);
+    if (existing) clearTimeout(existing);
+    const delay = luckyBagExpiryDelayMs(expiryOrDelay);
+    const timer = setTimeout(() => {
+      luckyBagExpiryTimersRef.current.delete(key);
+      setActiveLuckyBag((current) => String(current?.id || '') === key ? null : current);
+    }, delay);
+    luckyBagExpiryTimersRef.current.set(key, timer);
+  }, []);
+  useEffect(() => () => {
+    luckyBagExpiryTimersRef.current.forEach((timer) => clearTimeout(timer));
+    luckyBagExpiryTimersRef.current.clear();
+  }, []);
   const [luckyBagClaiming, setLuckyBagClaiming] = useState(false);
   // 'idle' | 'pending' (15s countdown) | 'open' (claimable) | 'done' (this
   // user has already tapped — bag hides for them, others can still grab)
@@ -621,6 +864,14 @@ export default function BroadcastRoomScreen() {
   const [profileModalLoading, setProfileModalLoading] = useState(false);
   const [isLiveEndedForViewer, setIsLiveEndedForViewer] = useState(false); // New: Show modal to viewer when host ends
   const [peakViewers, setPeakViewers] = useState(0);
+  // Shared guards for both a normal host exit and an admin-forced exit.
+  // Keeping these as refs makes the realtime callbacks idempotent when the
+  // database UPDATE and room broadcast arrive at nearly the same time.
+  const streamEndedRef = useRef(false);
+  const forcedEndHandledRef = useRef(false);
+  const appStateRef = useRef(AppState.currentState);
+  const hostBackgroundedAtRef = useRef(0);
+  const hostBackgroundTimeoutRef = useRef(null);
 
   // Audio SFX Engine
   const soundRef = useRef(null);
@@ -628,19 +879,19 @@ export default function BroadcastRoomScreen() {
   const chatInputRef = useRef(null);
   const channelRef = useRef(null);
   const userRef = useRef(user);
-  // Cross-live notification channel — global broadcast that every live
-  // room subscribes to. Notable events (≥500💎 gifts, lucky bag drops)
-  // fan out to every other room's chat list so viewers can hop between
-  // hot rooms. Self-room events are filtered at the receiver.
-  const globalEventsChannelRef = useRef(null);
-  // Tracks the active cross-live notification id per source room so a
-  // new notification from the same room replaces the old one instead
-  // of stacking. Map<sourceRoomId, chatItemId>.
-  const activeCrossLiveNotifsRef = useRef(new Map());
+  // Cross-live global events appear briefly at the top of every room rather
+  // than becoming permanent rows at the bottom of the chat feed.
+  const seenGlobalEventIdsRef = useRef(new Set());
+  const globalAnnouncementTimerRef = useRef(null);
   // Presence sync can fire on every viewer join/leave (no built-in debounce).
   // We collapse rapid syncs into a 300ms window so React doesn't re-render
   // the seat grid + viewer list multiple times per second.
   const presenceSyncTimerRef = useRef(null);
+  // A short loss of both presence and Agora is normal while Android changes
+  // audio routes or the app reconnects. Keep seats stable during that window;
+  // only the host's timer may release a guest after a sustained disconnect.
+  const guestDisconnectTimersRef = useRef(new Map());
+  const latestPresenceIdsRef = useRef(new Set());
   // Live mirror of agora.remoteUids — used by the host's presence
   // handler to cross-check whether a "missing from supabase presence"
   // guest is still actually connected on Agora. Android Doze kills
@@ -653,42 +904,81 @@ export default function BroadcastRoomScreen() {
   // Viewer-side guard: when the host vanishes from presence (force-quit
   // app, lost network entirely), we don't want to flip to "Live ended"
   // on the FIRST missing sync because a brief radio blip can drop the
-  // host for 2-3 seconds and they reconnect fine. We arm an 8-second
-  // grace timer the moment they disappear and cancel it if they come
-  // back. If the timer fires, the live really is dead — show the
-  // ended modal so the viewer doesn't sit on a ghost room until the
-  // 90-second DB cleanup catches up.
+  // host for 2-3 seconds and they reconnect fine. We arm the shared
+  // background grace timer the moment they disappear and cancel it if
+  // they come back. Expiry only requests a combined DB + Agora check;
+  // presence loss by itself is never treated as a confirmed end.
   const hostMissingTimerRef = useRef(null);
+  // All non-explicit "ended" signals are provisional. Database status,
+  // presence and Agora can each lag during entry/reconnect, so they funnel
+  // through one delayed health check before the modal is allowed to open.
+  const endedVerificationTimerRef = useRef(null);
+  const hostMediaPresentRef = useRef(false);
+  const explicitLiveEndRef = useRef(false);
+  const streamRecordIdRef = useRef(null);
   // Safety net for "Joining…" hangs. If a viewer enters a room and we
   // never successfully see the host publishing within JOIN_TIMEOUT,
-  // we declare the live ended. Covers any failure mode the other
-  // layers might miss (server bug, Agora handshake failed, network
-  // routed but realtime broken, etc).
+  // we request the same combined DB + Agora health check. This covers
+  // failure modes the other layers might miss without treating a slow
+  // Agora handshake as proof that a healthy live ended.
   const joinTimeoutRef = useRef(null);
+
+  useEffect(() => {
+    explicitLiveEndRef.current = false;
+    setIsLiveEndedForViewer(false);
+    if (endedVerificationTimerRef.current) {
+      clearTimeout(endedVerificationTimerRef.current);
+      endedVerificationTimerRef.current = null;
+    }
+  }, [id, isHostView]);
 
   useEffect(() => {
     userRef.current = user;
   }, [user]);
 
   const broadcastMallIntroForUser = useCallback(async (introUser = userRef.current) => {
-    const liveStreamKey = streamRecordId ? String(streamRecordId) : null;
-    if (!liveStreamKey || !channelRef.current || !introUser?.id || !introUser?.selectedMallIntro || !introUser?.selectedMallIntroVideoUrl) {
+    const liveStreamKey = streamRecordIdRef.current ? String(streamRecordIdRef.current) : null;
+    if (!liveStreamKey || !channelRef.current || !introUser?.id) {
       return;
     }
-    const visitKey = `${liveStreamKey}:${introUser.id}`;
+
+    // Admin grants can land after GlobalState hydrated, or while this screen's
+    // long-lived room channel still has an older user closure. Read the
+    // entering user's own assignment once at the moment of entry. The owner
+    // can read admin-only catalog rows via RLS; the resolved public media URL
+    // is then carried in the broadcast so other viewers never need that access.
+    let assignedIntroUser = introUser;
+    try {
+      const { data: freshProfile, error: freshProfileError } = await supabase
+        .from('profiles')
+        .select('id,full_name,selected_mall_intro,selected_mall_intro_video_url,selected_mall_intro_thumbnail_url')
+        .eq('id', introUser.id)
+        .maybeSingle();
+      if (!freshProfileError && freshProfile) {
+        assignedIntroUser = assignedIntroFromProfile(freshProfile, introUser);
+      }
+    } catch (_) {
+      // The cached assignment remains a valid fallback during a transient
+      // profile-read failure.
+    }
+    if (!assignedIntroUser?.selectedMallIntro) return;
+
+    const resolvedIntro = await resolveAssignedMallIntro(assignedIntroUser);
+    if (!channelRef.current || String(streamRecordIdRef.current || '') !== liveStreamKey) return;
+    const visitKey = `${liveStreamKey}:${assignedIntroUser.id}`;
     if (sentMallIntroVisitRef.current.has(visitKey)) return;
     sentMallIntroVisitRef.current.add(visitKey);
     const ts = Date.now();
-    const eventKey = `${liveStreamKey}:${introUser.id}:${ts}`;
+    const eventKey = `${liveStreamKey}:${assignedIntroUser.id}:${ts}`;
     const payload = {
-      id: introUser.id,
+      id: assignedIntroUser.id,
       ts,
       eventKey,
-      name: introUser.name || 'A viewer',
+      name: assignedIntroUser.name || 'A viewer',
       liveStreamId: liveStreamKey,
-      introId: introUser.selectedMallIntro,
-      videoUrl: introUser.selectedMallIntroVideoUrl,
-      thumbnailUrl: introUser.selectedMallIntroThumbnailUrl,
+      introId: resolvedIntro.introId,
+      videoUrl: resolvedIntro.videoUrl,
+      thumbnailUrl: resolvedIntro.thumbnailUrl,
     };
     if (!playedMallIntroUserIdsRef.current.has(eventKey)) {
       playedMallIntroUserIdsRef.current.add(eventKey);
@@ -700,10 +990,13 @@ export default function BroadcastRoomScreen() {
       });
     }
     channelRef.current.send({ type: 'broadcast', event: 'mall_intro', payload });
-  }, [queueMallIntro, streamRecordId]);
+  }, [queueMallIntro, resolveAssignedMallIntro]);
 
   useEffect(() => {
-    if (isHostView || !user?.id || !user?.selectedMallIntro || !user?.selectedMallIntroVideoUrl) return;
+    // Do not gate this on the cached selectedMallIntro value. The fresh
+    // profile read inside broadcastMallIntroForUser is specifically what
+    // recovers admin assignments made after app/profile hydration.
+    if (isHostView || !user?.id) return;
     broadcastMallIntroForUser(user);
   }, [
     broadcastMallIntroForUser,
@@ -712,6 +1005,7 @@ export default function BroadcastRoomScreen() {
     user?.id,
     user?.selectedMallIntro,
     user?.selectedMallIntroVideoUrl,
+    user?.selectedMallIntroThumbnailUrl,
   ]);
 
   const SFX_ASSETS = {
@@ -784,7 +1078,23 @@ export default function BroadcastRoomScreen() {
   // phones the moment they tapped "Go Live". Hosts can re-enable via the
   // Beauty button; opt-in is the right default for thermal headroom.
   const [beautyLevels, setBeautyLevels] = useState({ smooth: 0, whiten: 0, redness: 0, sharp: 0 });
+  // Agora 4.5 video-enhancement extras, all built into the SDK we already ship
+  // and none of them needing a bundled asset:
+  //   shapeStyle 0 = off, otherwise FaceShapeBeautyStyle (1 Female, 2 Male, 3 Natural
+  //   shifted by one so 0 can mean "off"); intensity is the 0..4 bar scaled to 0..100.
+  //   bgBlur 0 = off, 1..3 = BackgroundBlurDegree low/medium/high.
+  const [faceShape, setFaceShape] = useState({ style: 0, intensity: 2 });
+  const [bgBlur, setBgBlur] = useState(0);
+  const [camEnhance, setCamEnhance] = useState({ lowlight: false, denoise: false, vivid: false });
   const [showBeautySheet, setShowBeautySheet] = useState(false);
+  // The Beauty button's "on" indicator must reflect every enhancement, not just
+  // the original four sliders, or turning on only blur/face-shape looks inert.
+  const anyBeautyOn = useMemo(() => (
+    (beautyLevels.smooth + beautyLevels.whiten + beautyLevels.redness + beautyLevels.sharp) > 0
+    || faceShape.style > 0
+    || bgBlur > 0
+    || camEnhance.lowlight || camEnhance.denoise || camEnhance.vivid
+  ), [beautyLevels, faceShape.style, bgBlur, camEnhance]);
   // Single-button host-tools sheet. Replaces the 4-stack sidebar that
   // used to overlap the floating guest tiles on the right edge — now
   // there's just one circular trigger above the action bar, opening
@@ -805,6 +1115,9 @@ export default function BroadcastRoomScreen() {
 
   const comboTimeoutRef = useRef(null);
   const lottieTimeoutRef = useRef(null);
+  const giftAnimationTimerRef = useRef(null);
+  const giftAnimationQueueRef = useRef([]);
+  const giftAnimationBusyRef = useRef(false);
   const toastTimeoutRef = useRef(null);
 
   const comboAnim = useRef(new Animated.Value(1)).current;
@@ -1009,6 +1322,7 @@ export default function BroadcastRoomScreen() {
   }, []);
   const [isCameraReadyToMount, setIsCameraReadyToMount] = useState(false);
   const [entranceBanner, setEntranceBanner] = useState(null); // { name, type, level }
+  const [entranceBannerQueue, setEntranceBannerQueue] = useState([]);
   const entranceAnimX = useRef(new Animated.Value(-width)).current;
   const entranceAnimOpacity = useRef(new Animated.Value(0)).current;
 
@@ -1031,7 +1345,7 @@ export default function BroadcastRoomScreen() {
           })
         ]),
         // Hold
-        Animated.delay(3500),
+        Animated.delay(5000),
         // Slide Out
         Animated.parallel([
           Animated.timing(entranceAnimX, {
@@ -1046,12 +1360,21 @@ export default function BroadcastRoomScreen() {
             useNativeDriver: true,
           })
         ])
-      ]).start();
+      ]).start(({ finished }) => {
+        if (finished) setEntranceBanner(null);
+      });
     } else {
       entranceAnimX.setValue(-width);
       entranceAnimOpacity.setValue(0);
     }
   }, [entranceBanner]);
+
+  useEffect(() => {
+    if (entranceBanner || entranceBannerQueue.length === 0) return;
+    const [next, ...rest] = entranceBannerQueue;
+    setEntranceBannerQueue(rest);
+    setEntranceBanner(next);
+  }, [entranceBanner, entranceBannerQueue]);
 
   useEffect(() => {
     // Entrance logic for real viewers can be added here if needed
@@ -1104,84 +1427,120 @@ export default function BroadcastRoomScreen() {
   // Viewer: find the active live_streams row for this broadcaster, for room context
   useEffect(() => {
     if (isHostView || !id) return;
+    let cancelled = false;
     (async () => {
-      // Check the most recent stream regardless of status — if it ended, show the modal.
-      const { data } = await supabase
-        .from('live_streams')
-        .select('id, status, active_template_id')
-        .eq('broadcaster_id', id)
-        .order('started_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      // Home cards carry the exact live_streams row they were rendered from.
+      // Adopt that row first so an older ended row or a reconnect-created row
+      // for the same broadcaster cannot make entry attach to the wrong live.
+      let data = null;
+      let lookupError = null;
+      if (prewarmedStreamId) {
+        const routedLookup = await supabase
+          .from('live_streams')
+          .select('id, status, active_template_id, total_gifts, total_earnings, audio_slot_count')
+          .eq('id', String(prewarmedStreamId))
+          .eq('broadcaster_id', id)
+          .eq('status', 'live')
+          .maybeSingle();
+        data = routedLookup.data;
+        lookupError = routedLookup.error;
+      }
 
+      // Prefer an actually-active row. A newer stale/ended row can coexist
+      // briefly with the healthy row during host reconnect, so "latest row
+      // regardless of status" produced false Live Ended modals.
       if (!data) {
-        // No stream at all
-        setIsLiveEndedForViewer(true);
+        const activeLookup = await supabase
+          .from('live_streams')
+          .select('id, status, active_template_id, total_gifts, total_earnings, audio_slot_count')
+          .eq('broadcaster_id', id)
+          .eq('status', 'live')
+          .order('started_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        data = activeLookup.data;
+        lookupError = activeLookup.error;
+      }
+
+      if (cancelled) return;
+      // A transport/RLS/PostgREST failure is unknown state, never evidence
+      // that a live is closed. Retry while Agora continues connecting.
+      if (lookupError) {
+        scheduleViewerEndVerification('initial-stream-lookup-error', 5000);
         return;
       }
-      if (data.status !== 'live') {
-        setIsLiveEndedForViewer(true);
+      if (!data) {
+        scheduleViewerEndVerification('initial-stream-lookup', 10000);
         return;
       }
+      explicitLiveEndRef.current = false;
+      setIsLiveEndedForViewer(false);
       setStreamRecordId(data.id);
+      setEarnings(Number(data.total_earnings) || 0);
+      setTotalGiftsReceived(Number(data.total_gifts) || 0);
+      if (Number.isFinite(Number(data.audio_slot_count))) {
+        const persistedSlots = Math.max(2, Math.min(12, Number(data.audio_slot_count)));
+        setAudioSlotCount(persistedSlots);
+        setSlotInput(String(persistedSlots));
+        commitActiveGuests((current) => resizeAudioGuestSeats(current, persistedSlots));
+      }
       // Hydrate the current background so viewers see it before the
       // first realtime UPDATE on this row arrives (mig 88).
       setActiveTemplateId(data.active_template_id || null);
     })();
-  }, [id, isHostView]);
+    return () => { cancelled = true; };
+  }, [id, isHostView, prewarmedStreamId]);
+
+  // Host reconnect/adoption path: restore persisted capacity too. A seat
+  // count is room configuration, never something inferred from occupancy.
+  useEffect(() => {
+    if (!isHostView || !streamRecordId || type !== 'audio') return;
+    let cancelled = false;
+    supabase.from('live_streams').select('audio_slot_count').eq('id', streamRecordId).maybeSingle()
+      .then(({ data }) => {
+        if (cancelled || !Number.isFinite(Number(data?.audio_slot_count))) return;
+        const persistedSlots = Math.max(2, Math.min(12, Number(data.audio_slot_count)));
+        setAudioSlotCount(persistedSlots);
+        setSlotInput(String(persistedSlots));
+        commitActiveGuests((current) => resizeAudioGuestSeats(current, persistedSlots));
+      });
+    return () => { cancelled = true; };
+  }, [isHostView, streamRecordId, type]);
 
   // Viewer-side realtime watcher: if the live_streams row flips to
   // anything other than 'live' (host pressed End, or
   // cleanup_stale_live_streams marked it ended after the host's app
-  // crashed without heartbeat), trigger the "Live ended" modal
-  // immediately instead of leaving viewers staring at a dead room.
+  // crashed without heartbeat), verify the room against both the active
+  // stream row and Agora media before opening the "Live ended" modal.
   //
-  // This is the SLOWER but more reliable detection layer — the
-  // presence-based one below catches host crashes in ~8s, this one
-  // catches everything else (clean exits, server-side cleanup,
-  // admin force-end). Both running in parallel is intentional.
+  // This is the durable status signal; presence and Agora provide the
+  // independent media/connectivity signal. Explicit end_live broadcasts
+  // still bypass this grace path and open the modal immediately.
   // Host-side: keep the local activeTemplateId in sync with whatever
   // row exists on live_streams. Necessary because the host may apply a
   // template from another device, or reopen the app mid-stream. Mig 88
   // RLS lets the host read their own row, so this fetch + sub work
   // without any new policies.
   useEffect(() => {
-    if (!isHostView || !streamRecordId) return undefined;
-    (async () => {
-      const { data } = await supabase
-        .from('live_streams')
-        .select('active_template_id')
-        .eq('id', streamRecordId)
-        .maybeSingle();
-      if (data) setActiveTemplateId(data.active_template_id || null);
-    })();
-    const ch = supabase
-      .channel(`host-bg-${streamRecordId}`)
-      .on('postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'live_streams', filter: `id=eq.${streamRecordId}` },
-        ({ new: row }) => {
-          if (row && 'active_template_id' in row) {
-            setActiveTemplateId(row.active_template_id || null);
-          }
-        })
-      .subscribe();
-    return () => { try { supabase.removeChannel(ch); } catch (_) {} };
-  }, [isHostView, streamRecordId]);
-
-  useEffect(() => {
     if (isHostView || !streamRecordId) return;
     const ch = supabase
-      .channel(`stream-status-${streamRecordId}`)
+      .channel(`stream-status-${streamRecordId}-${Date.now()}`)
       .on('postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'live_streams', filter: `id=eq.${streamRecordId}` },
         ({ new: row }) => {
           if (row && row.status && row.status !== 'live') {
-            setIsLiveEndedForViewer(true);
+            scheduleViewerEndVerification('stream-status-update', 8000);
           }
           // Mirror the room's active background (mig 88) so viewers see
           // the same template the host picked, in realtime.
           if (row && 'active_template_id' in row) {
             setActiveTemplateId(row.active_template_id || null);
+          }
+          if (Number.isFinite(Number(row?.total_earnings))) {
+            setEarnings(Number(row.total_earnings) || 0);
+          }
+          if (Number.isFinite(Number(row?.total_gifts))) {
+            setTotalGiftsReceived(Number(row.total_gifts) || 0);
           }
         }
       )
@@ -1189,57 +1548,67 @@ export default function BroadcastRoomScreen() {
     return () => { try { supabase.removeChannel(ch); } catch (_) {} };
   }, [isHostView, streamRecordId]);
 
-  // Global cross-live events — subscribe to the shared channel so we
-  // hear about notable gifts + lucky bags happening in other rooms.
-  // Self-room events are filtered out; per-source-room dedup keeps
-  // the chat from filling with one source's spam.
+  // Global live events — every audio and video room subscribes to the
+  // same topic for high-value gifts, Lucky Bags and game wins.
   useEffect(() => {
     if (!user?.id || !id) return undefined;
 
     const handleNotification = (subType, payload) => {
-      // Don't show notifications from the same room we're in.
-      if (!payload || payload.roomId === id) return;
-      const sourceRoomId = payload.roomId;
-      // Per-source-room dedup: drop the previous notification from
-      // this room (if any) before appending the new one.
-      const prevId = activeCrossLiveNotifsRef.current.get(sourceRoomId);
-      const notifId = `xlive-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-      activeCrossLiveNotifsRef.current.set(sourceRoomId, notifId);
-      setChats((prev) => {
-        const filtered = prevId ? prev.filter((c) => c.id !== prevId) : prev;
-        const next = [...filtered, {
-          id: notifId,
-          type: 'live_notification',
-          subType,
-          payload,
-          ts: Date.now(),
-        }];
-        // Existing 50-item chat cap applies via the realtime chat
-        // handler elsewhere; we slice here too so a notification
-        // burst can't overrun.
-        return next.length > 50 ? next.slice(next.length - 50) : next;
-      });
+      if (!payload) return;
+      const eventId = payload.eventId || `${subType}-${payload.roomId || 'global'}-${payload.roundId || payload.ts || ''}`;
+      if (seenGlobalEventIdsRef.current.has(eventId)) return;
+      seenGlobalEventIdsRef.current.add(eventId);
+      if (seenGlobalEventIdsRef.current.size > 2000) {
+        const oldest = seenGlobalEventIdsRef.current.values().next().value;
+        seenGlobalEventIdsRef.current.delete(oldest);
+      }
+      setGlobalLiveAnnouncementQueue((current) => appendLiveAnnouncementFifo(
+        current,
+        { subType, payload, id: eventId },
+      ));
     };
 
-    const ch = supabase
-      .channel('global-live-events')
-      .on('broadcast', { event: 'gift_in_live' }, ({ payload }) => handleNotification('gift', payload))
-      .on('broadcast', { event: 'lucky_bag_in_live' }, ({ payload }) => handleNotification('lucky_bag', payload))
-      .subscribe();
-
-    globalEventsChannelRef.current = ch;
+    const unsubscribe = subscribeGlobalLiveAnnouncements((event, payload) => {
+      if (event === 'gift_in_live') handleNotification('gift', payload);
+      else if (event === 'lucky_bag_in_live') {
+        if (!luckyBagBelongsToLive(payload, id, streamRecordId)) return;
+        const globalBag = normalizeGlobalLuckyBag(payload);
+        if (globalBag) {
+          setActiveLuckyBag(globalBag);
+          scheduleLuckyBagExpiry(globalBag.id, globalBag.expiresAt || 75000);
+        }
+      }
+      else if (event === 'lucky_bag_drop_global') {
+        if (!luckyBagBelongsToLive(payload, id, streamRecordId)) return;
+        const globalBag = normalizeGlobalLuckyBag(payload);
+        if (globalBag) {
+          setActiveLuckyBag(globalBag);
+          scheduleLuckyBagExpiry(globalBag.id, globalBag.expiresAt || 75000);
+        }
+      }
+      else if (event === 'game_win_in_live') handleNotification('game_win', payload);
+    });
 
     return () => {
-      try { supabase.removeChannel(ch); } catch (_) {}
-      globalEventsChannelRef.current = null;
-      activeCrossLiveNotifsRef.current.clear();
+      unsubscribe();
+      if (globalAnnouncementTimerRef.current) clearTimeout(globalAnnouncementTimerRef.current);
+      globalAnnouncementTimerRef.current = null;
+      setGlobalLiveAnnouncement(null);
+      setGlobalLiveAnnouncementQueue([]);
+      seenGlobalEventIdsRef.current.clear();
     };
-  }, [user?.id, id]);
+  }, [user?.id, id, streamRecordId, scheduleLuckyBagExpiry]);
 
-  // Tracks whether the host has already explicitly ended the stream
-  // (via the End Now button). If so, the unmount cleanup below skips
-  // its endLiveStream call to avoid a redundant DB write.
-  const streamEndedRef = useRef(false);
+  useEffect(() => {
+    if (globalLiveAnnouncement || globalLiveAnnouncementQueue.length === 0) return;
+    const [next, ...rest] = globalLiveAnnouncementQueue;
+    setGlobalLiveAnnouncementQueue(rest);
+    setGlobalLiveAnnouncement(next);
+    globalAnnouncementTimerRef.current = setTimeout(() => {
+      setGlobalLiveAnnouncement((current) => current?.id === next.id ? null : current);
+      globalAnnouncementTimerRef.current = null;
+    }, LIVE_ANNOUNCEMENT_DISPLAY_MS);
+  }, [globalLiveAnnouncement, globalLiveAnnouncementQueue]);
 
   // End live stream on unmount (host only) — defense in depth for the case
   // where the host backgrounds or force-quits without pressing End Now.
@@ -1270,6 +1639,10 @@ export default function BroadcastRoomScreen() {
   useEffect(() => {
     if (!isHostView || !streamRecordId) return;
     const ping = async () => {
+      // A minimized host gets a two-minute return window. Do not refresh
+      // the server heartbeat in that state or a killed/background-frozen
+      // process could leave a ghost live indefinitely.
+      if (appStateRef.current !== 'active') return;
       try {
         await supabase.rpc('live_stream_heartbeat', {
           p_stream_id:       streamRecordId,
@@ -1299,42 +1672,48 @@ export default function BroadcastRoomScreen() {
     return () => clearInterval(interval);
   }, [isHostView, streamRecordId, isLiveEndedForViewer, bumpWatchProgress]);
 
-  // Host earnings reconciliation. The local `earnings` / `totalGiftsReceived`
+  // Room earnings reconciliation. The local `earnings` / `totalGiftsReceived`
   // counters are updated from the realtime gift broadcast event, but if
   // the host's channel hiccups (network blip, brief backgrounding, etc.)
   // a gift can land server-side without firing the local listener. The
-  // `live_streams` row is updated atomically inside send_gift(), so we
-  // poll it every 30s and treat the DB as the source of truth. Worst
+  // `live_streams` row is updated atomically inside send_gift(), so every
+  // participant hydrates it immediately and polls it every 30s. Worst
   // case the summary card may briefly under-report by one gift; with
   // this poll it self-corrects within half a minute.
   useEffect(() => {
-    if (!isHostView || !streamRecordId) return undefined;
+    if (!streamRecordId) return undefined;
     let mounted = true;
     const sync = async () => {
       try {
-        const { data, error } = await supabase
-          .from('live_streams')
-          .select('total_gifts, total_earnings')
-          .eq('id', streamRecordId)
-          .maybeSingle();
-        if (!mounted || error || !data) return;
-        // Monotonically advance — never roll back below what the local
-        // state has already seen (a race where we read mid-write could
-        // briefly return a slightly stale value).
-        if (Number.isFinite(data.total_earnings)) {
-          setEarnings((cur) => Math.max(cur, Number(data.total_earnings) || 0));
+        const { data: snapshot, error: snapshotError } = await supabase
+          .rpc('get_live_gift_state', { p_stream_id: streamRecordId });
+        let data = snapshotError || snapshot?.success === false ? null : snapshot;
+        if (!data) {
+          const fallback = await supabase
+            .from('live_streams')
+            .select('total_gifts, total_earnings')
+            .eq('id', streamRecordId)
+            .maybeSingle();
+          data = fallback.error ? null : fallback.data;
         }
-        if (Number.isFinite(data.total_gifts)) {
-          setTotalGiftsReceived((cur) => Math.max(cur, Number(data.total_gifts) || 0));
+        if (!mounted || !data) return;
+        // This row is authoritative. Replacing local optimistic values is
+        // important after reconnect and also corrects a missed/duplicated
+        // room broadcast on either audio or video live.
+        if (Number.isFinite(Number(data.total_earnings))) {
+          setEarnings(Number(data.total_earnings) || 0);
+        }
+        if (Number.isFinite(Number(data.total_gifts))) {
+          setTotalGiftsReceived(Number(data.total_gifts) || 0);
         }
       } catch (e) {
         if (__DEV__) console.warn('earnings sync:', e?.message);
       }
     };
     sync();
-    const t = setInterval(sync, 30000);
+    const t = setInterval(sync, 10000);
     return () => { mounted = false; clearInterval(t); };
-  }, [isHostView, streamRecordId]);
+  }, [streamRecordId]);
 
   const formatDuration = (totalSeconds) => {
     const hrs = Math.floor(totalSeconds / 3600);
@@ -1444,6 +1823,60 @@ export default function BroadcastRoomScreen() {
 
   const isAudio = type === 'audio' || (stream.streamType === 'audio');
 
+  const announceGameWin = useCallback(({ amount, gameName, roundId, winnerId, winnerName, winnerAvatar, isBot }) => {
+    if (Number(amount || 0) < LIVE_ANNOUNCEMENT_THRESHOLDS.gameWin) return;
+    const resolvedWinnerId = winnerId || user?.id;
+    const resolvedWinnerName = winnerName || user?.name || 'Someone';
+    publishGlobalLiveAnnouncement('game_win_in_live', {
+      eventId: `game-${roundId}-${resolvedWinnerId || resolvedWinnerName}`,
+      roundId,
+      roomId: id,
+      mode,
+      type,
+      hostName: stream?.broadcasterName,
+      winnerId: resolvedWinnerId,
+      winnerName: resolvedWinnerName,
+      winnerAvatar: winnerAvatar || (!isBot ? user?.avatar : null) || null,
+      winnerAvatarIndex: isBot ? stableAssetIndex(resolvedWinnerId || resolvedWinnerName, 25) : undefined,
+      isBot: isBot === true,
+      amount: Number(amount || 0),
+      gameName,
+    }).catch(() => {});
+  }, [id, mode, stream?.broadcasterName, type, user?.avatar, user?.id, user?.name]);
+
+  const renderGlobalLiveAnnouncement = () => {
+    if (!globalLiveAnnouncement) return null;
+    const p = globalLiveAnnouncement.payload || {};
+    const isGift = globalLiveAnnouncement.subType === 'gift';
+    const isGameWin = globalLiveAnnouncement.subType === 'game_win';
+    const icon = isGift ? '🎁' : isGameWin ? '🏆' : '💰';
+    const frameSource = announcementFrameFor(globalLiveAnnouncement.id);
+    const avatarSource = isGameWin && p.isBot
+      ? botProfileFor(p.winnerId || p.winnerName)
+      : p.winnerAvatar ? { uri: p.winnerAvatar }
+        : isGift && p.senderAvatar ? { uri: p.senderAvatar } : null;
+    const body = isGift
+      ? `${p.senderName || 'Someone'} sent ${p.count > 1 ? `${p.count}x ` : ''}${p.giftName || 'a gift'} to ${p.hostName || 'a host'}`
+      : isGameWin
+        ? `${p.winnerName || 'Someone'} won ${Number(p.amount || 0).toLocaleString()} 💎 in ${p.gameName || 'a game'}`
+        : `${p.dropperName || 'Someone'} dropped ${(Number(p.perWinner) * Number(p.winnerCount || 0)).toLocaleString()} 💎 Lucky Bag`;
+    return (
+      <View
+        style={[styles.globalLiveAnnouncement, {
+          top: isAudio ? insets.top + 122 : insets.top + 60,
+        }]}
+      >
+        <Image source={frameSource} style={styles.globalLiveAnnouncementFrame} resizeMode="stretch" pointerEvents="none" />
+        <View style={styles.globalLiveAnnouncementContent} pointerEvents="none">
+          {avatarSource
+            ? <Image source={avatarSource} style={styles.globalLiveAnnouncementAvatar} />
+            : <View style={styles.globalLiveAnnouncementIconWrap}><Text style={styles.globalLiveAnnouncementIcon}>{icon}</Text></View>}
+          <Text style={styles.globalLiveAnnouncementText} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.72}>{body}</Text>
+        </View>
+      </View>
+    );
+  };
+
   // ----- AGORA REAL-TIME ENGINE -----
   // Host + accepted guests publish; everyone else subscribes. Channel name is
   // the broadcaster's id so host & viewers share one channel.
@@ -1464,8 +1897,6 @@ export default function BroadcastRoomScreen() {
   });
 
   const gameSheetOpen = gameMenuState !== null;
-  const audioGameCovered = isAudio && gameSheetOpen;
-  const setRemoteVideoPaused = agora.setRemoteVideoPaused;
   useEffect(() => {
     if (gameSheetOpen && showGiftMenu) setShowGiftMenu(false);
     if (gameSheetOpen && showMoreMenu) setShowMoreMenu(false);
@@ -1474,19 +1905,138 @@ export default function BroadcastRoomScreen() {
     if (gameSheetOpen && showAudioTemplates) setShowAudioTemplates(false);
   }, [gameSheetOpen, showAudioTemplates, showGiftMenu, showHostMoreMenu, showMoreMenu, showSFXMenu]);
 
-  useEffect(() => {
-    if (isAudio || !agora.joined) return undefined;
-    // The game sheet covers the live video. Pause hidden remote video decode
-    // while keeping audio subscribed so the room still feels live.
-    setRemoteVideoPaused?.(gameSheetOpen);
-    return () => {
-      setRemoteVideoPaused?.(false);
-    };
-  }, [isAudio, agora.joined, gameSheetOpen, setRemoteVideoPaused]);
   // The broadcaster's deterministic Agora uid — used by viewers to render the
   // host's remote feed in the fullscreen background.
   const hostUid = agoraUidFromId(String(id || ''));
   const setAgoraPublishing = agora.setPublishing;
+
+  streamRecordIdRef.current = streamRecordId;
+  hostMediaPresentRef.current = !!(agora.joined && agora.remoteUids.includes(hostUid));
+
+  // Expo Router can retain this screen instance while replacing one live
+  // route with another. Never carry a Lucky Bag from the previous stream
+  // through that transition; only the exact source room + stream may render
+  // it again through room replay or the persisted announcement row.
+  useEffect(() => {
+    setActiveLuckyBag((current) => (
+      current && luckyBagBelongsToLive(current, id, streamRecordId) ? current : null
+    ));
+  }, [id, streamRecordId]);
+
+  /**
+   * Confirm a provisional end signal against both authoritative DB state and
+   * the actual Agora host track. A running media track always wins over a
+   * stale status/presence snapshot. Explicit host/admin end broadcasts bypass
+   * this verifier elsewhere.
+   */
+  function scheduleViewerEndVerification(reason, delayMs = 3000) {
+    if (isHostView || explicitLiveEndRef.current) return;
+    if (endedVerificationTimerRef.current) clearTimeout(endedVerificationTimerRef.current);
+    endedVerificationTimerRef.current = setTimeout(async () => {
+      endedVerificationTimerRef.current = null;
+      if (explicitLiveEndRef.current) return;
+
+      // Re-fetch even when host media is already present. During go-live or
+      // reconnect, Agora can become healthy before the new DB row is visible;
+      // this retry is what attaches gifts and room state to the correct row.
+      const { data: activeStream, error: activeStreamError } = await supabase
+        .from('live_streams')
+        .select('id,status,total_gifts,total_earnings,audio_slot_count')
+        .eq('broadcaster_id', id)
+        .eq('status', 'live')
+        .order('started_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      // Network loss, token refresh, and transient PostgREST failures happen
+      // during room entry. They mean "unknown", not "ended". Keep the room
+      // open and retry instead of presenting a false terminal modal.
+      if (activeStreamError) {
+        scheduleViewerEndVerification(`${reason}-retry`, 5000);
+        return;
+      }
+
+      if (activeStream?.id) {
+        setStreamRecordId(activeStream.id);
+        setEarnings(Number(activeStream.total_earnings) || 0);
+        setTotalGiftsReceived(Number(activeStream.total_gifts) || 0);
+        setIsLiveEndedForViewer(false);
+        return;
+      }
+      // The host may have joined Agora while the DB recheck was in flight.
+      if (hostMediaPresentRef.current || explicitLiveEndRef.current) return;
+      if (__DEV__) console.warn('Live end verified:', reason, streamRecordIdRef.current);
+      setIsLiveEndedForViewer(true);
+    }, delayMs);
+  }
+
+  useEffect(() => {
+    if (!hostMediaPresentRef.current || explicitLiveEndRef.current) return;
+    if (endedVerificationTimerRef.current) {
+      clearTimeout(endedVerificationTimerRef.current);
+      endedVerificationTimerRef.current = null;
+    }
+    // Recover automatically if a provisional modal opened during an entry
+    // race and the healthy host track arrived immediately afterwards.
+    if (isLiveEndedForViewer) setIsLiveEndedForViewer(false);
+  }, [agora.joined, agora.remoteUids, hostUid, isLiveEndedForViewer]);
+
+  // This callback depends on the Agora controller, so it must be declared
+  // after useAgoraEngine. Declaring it earlier caused both audio and video
+  // hosts to crash immediately after joining with `setPublishing` undefined.
+  const handleAdminForcedEnd = useCallback(() => {
+    // A normal local End Now sets streamEndedRef before updating the row.
+    // Do not mistake that resulting UPDATE for an admin termination.
+    if (forcedEndHandledRef.current || streamEndedRef.current) return;
+    forcedEndHandledRef.current = true;
+    streamEndedRef.current = true;
+    try { setAgoraPublishing(false); } catch (e) {
+      if (__DEV__) console.warn('forced end publishing cleanup:', e?.message);
+    }
+    showCuteAlert('Stream Ended', 'This live was ended by an administrator.');
+    router.replace('/main/(tabs)/');
+  }, [setAgoraPublishing, router]);
+
+  useEffect(() => {
+    if (!isHostView || !streamRecordId) return undefined;
+    (async () => {
+      const { data } = await supabase
+        .from('live_streams')
+        .select('status, active_template_id, total_gifts, total_earnings')
+        .eq('id', streamRecordId)
+        .maybeSingle();
+      if (data?.status && data.status !== 'live') {
+        handleAdminForcedEnd();
+        return;
+      }
+      if (data) {
+        setActiveTemplateId(data.active_template_id || null);
+        setEarnings(Number(data.total_earnings) || 0);
+        setTotalGiftsReceived(Number(data.total_gifts) || 0);
+      }
+    })();
+    const ch = supabase
+      .channel(`host-stream-status-${streamRecordId}-${Date.now()}`)
+      .on('postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'live_streams', filter: `id=eq.${streamRecordId}` },
+        ({ new: row }) => {
+          if (row?.status && row.status !== 'live') {
+            handleAdminForcedEnd();
+            return;
+          }
+          if (row && 'active_template_id' in row) {
+            setActiveTemplateId(row.active_template_id || null);
+          }
+          if (Number.isFinite(Number(row?.total_earnings))) {
+            setEarnings(Number(row.total_earnings) || 0);
+          }
+          if (Number.isFinite(Number(row?.total_gifts))) {
+            setTotalGiftsReceived(Number(row.total_gifts) || 0);
+          }
+        })
+      .subscribe();
+    return () => { try { supabase.removeChannel(ch); } catch (_) {} };
+  }, [isHostView, streamRecordId, handleAdminForcedEnd]);
 
   // Admin dashboard room-block safety net. This is scoped to the
   // current broadcast screen only, so it does not add global app load.
@@ -1560,13 +2110,9 @@ export default function BroadcastRoomScreen() {
       // One last check — if the host showed up between the timer being
       // set and now, don't kill the room.
       if (!isHostView && !(agora.joined && agora.remoteUids.includes(hostUid))) {
-        setIsLiveEndedForViewer(true);
-        if (streamRecordId) {
-          Promise.resolve(supabase.rpc('report_dead_stream', { p_stream_id: streamRecordId }))
-            .catch(() => { /* best effort */ });
-        }
+        scheduleViewerEndVerification('agora-join-timeout', 1500);
       }
-    }, 15000);
+    }, HOST_BACKGROUND_TIMEOUT_MS);
     return undefined;
   }, [isHostView, agora.joined, agora.remoteUids, hostUid, streamRecordId]);
 
@@ -1586,7 +2132,15 @@ export default function BroadcastRoomScreen() {
   // On foreground we re-enable. If the user is still 'accepted' or the
   // host, publishing resumes. The realtime channel itself is left alone
   // (no need to re-subscribe), only the media tracks are toggled.
-  const appStateRef = useRef(AppState.currentState);
+  const endMinimizedHostLive = useCallback(async () => {
+    if (!isHostView || !streamRecordId || streamEndedRef.current) return;
+    streamEndedRef.current = true;
+    try { setAgoraPublishing(false); } catch (_) {}
+    await endLiveStream(streamRecordId, peakViewers).catch(() => {});
+    router.replace('/main/(tabs)/');
+    showCuteAlert('Live ended', 'You did not return to your minimized live within 2 minutes.');
+  }, [endLiveStream, isHostView, peakViewers, router, setAgoraPublishing, streamRecordId]);
+
   useEffect(() => {
     if (!isAgoraPublisher) return undefined;
     const sub = AppState.addEventListener('change', (next) => {
@@ -1596,9 +2150,35 @@ export default function BroadcastRoomScreen() {
       const comingFg    = prev.match(/inactive|background/) && next === 'active';
       try {
         if (goingBg) {
+          if (isHostView) {
+            if (!hostBackgroundedAtRef.current) hostBackgroundedAtRef.current = Date.now();
+            if (hostBackgroundTimeoutRef.current) clearTimeout(hostBackgroundTimeoutRef.current);
+            const remaining = Math.max(
+              0,
+              HOST_BACKGROUND_TIMEOUT_MS - (Date.now() - hostBackgroundedAtRef.current),
+            );
+            hostBackgroundTimeoutRef.current = setTimeout(endMinimizedHostLive, remaining);
+            // Keep the Agora publisher active while the live is minimized.
+            // The two-minute timer and server heartbeat expiry bound this.
+            return;
+          }
           if (isVideoMode) agora.setCameraEnabled?.(false);
           agora.setMuted?.(true);
         } else if (comingFg) {
+          if (isHostView) {
+            const awayFor = hostBackgroundedAtRef.current
+              ? Date.now() - hostBackgroundedAtRef.current
+              : 0;
+            if (hostBackgroundTimeoutRef.current) {
+              clearTimeout(hostBackgroundTimeoutRef.current);
+              hostBackgroundTimeoutRef.current = null;
+            }
+            hostBackgroundedAtRef.current = 0;
+            if (awayFor >= HOST_BACKGROUND_TIMEOUT_MS) {
+              endMinimizedHostLive();
+            }
+            return;
+          }
           if (isVideoMode && isCamOn) agora.setCameraEnabled?.(true);
           // Unconditionally re-apply the user's mute intent. Previously
           // this only unmuted when the host was meant to be live, which
@@ -1612,13 +2192,30 @@ export default function BroadcastRoomScreen() {
       }
     });
     return () => { try { sub.remove(); } catch (_) {} };
-  }, [isAgoraPublisher, isVideoMode, isCamOn, isSelfMuted, agora]);
+  }, [isAgoraPublisher, isVideoMode, isCamOn, isSelfMuted, isHostView, agora, endMinimizedHostLive]);
+
+  useEffect(() => () => {
+    if (hostBackgroundTimeoutRef.current) clearTimeout(hostBackgroundTimeoutRef.current);
+  }, []);
+
+  useEffect(() => {
+    const captureKey = 'live-room-viewer-protection';
+    if (isHostView) {
+      ScreenCapture.allowScreenCaptureAsync(captureKey).catch(() => {});
+      return undefined;
+    }
+    ScreenCapture.preventScreenCaptureAsync(captureKey).catch(() => {});
+    return () => {
+      ScreenCapture.allowScreenCaptureAsync(captureKey).catch(() => {});
+    };
+  }, [isHostView]);
 
   // Host-controlled room state, mirrored into a ref every render so the
   // broadcast helper (and once-registered handlers) always read fresh values.
   roomStateRef.current = {
     title: urlTitle || '',
     goal: liveGoal,
+    earnings,
     locked: isSeatsLocked,
     lockedSeats, // per-seat lock array (seat indices)
     audioSlotCount,
@@ -1634,8 +2231,14 @@ export default function BroadcastRoomScreen() {
     // (line ~1279) re-broadcasts room_state on every new viewer join,
     // so this field reaches them within a couple hundred ms of entering.
     activeGuests,
+    // Lucky Bags are replayed in room_state so users who enter after the
+    // original broadcast still see and can join while its timer is active.
+    activeLuckyBag,
+    seatRevision: seatRevisionRef.current,
   };
-  activeGuestsRef.current = activeGuests;
+  useEffect(() => {
+    activeGuestsRef.current = activeGuests;
+  }, [activeGuests]);
   // Mirror Agora's remote uids into a ref so the presence handler (a
   // long-running supabase channel subscription, registered once with
   // [id, isHostView] deps) can read the latest list without capturing
@@ -1645,21 +2248,34 @@ export default function BroadcastRoomScreen() {
   // "gone" when both signals say so.
   agoraRemoteUidsRef.current = agora.remoteUids;
 
+  const nextSeatRevision = () => {
+    // Date-based revisions survive a host reconnect while viewers remain in
+    // the room. The +1 fallback keeps multiple updates in one millisecond ordered.
+    seatRevisionRef.current = Math.max(Date.now(), seatRevisionRef.current + 1);
+    return seatRevisionRef.current;
+  };
+
   // Push the current room state to everyone. Reads from the ref so it stays
   // correct even when called from a stale handler closure.
   const broadcastRoomState = () => {
     if (!isHostView || !channelRef.current) return;
+    roomStateRevisionRef.current = Math.max(Date.now(), roomStateRevisionRef.current + 1);
     channelRef.current.send({
       type: 'broadcast',
       event: 'room_state',
-      payload: roomStateRef.current,
+      payload: {
+        ...roomStateRef.current,
+        activeGuests: activeGuestsRef.current,
+        seatRevision: seatRevisionRef.current,
+        roomStateRevision: roomStateRevisionRef.current,
+      },
     });
   };
 
   // Re-broadcast whenever the host changes a synced control.
   useEffect(() => {
     if (isHostView) broadcastRoomState();
-  }, [isHostView, isSelfMuted, isSeatsLocked, lockedSeats, audioSlotCount, liveGoal, roomAdmins, blockedUsers]);
+  }, [isHostView, isSelfMuted, isSeatsLocked, lockedSeats, audioSlotCount, liveGoal, earnings, roomAdmins, blockedUsers, activeGuests, activeLuckyBag]);
 
   // Sync mute state â†’ Agora mic
   useEffect(() => {
@@ -1695,12 +2311,13 @@ export default function BroadcastRoomScreen() {
   }, [isCamOn, agora.joined, isAudio, isAgoraPublisher]);
 
   // Real Agora beauty filter — built-in, free with the Video SDK we already
-  // ship. Smoothness/Whiten/Redness/Sharpness map from 0..4 → 0.0..0.95.
+    // ship. Keep smoothing deliberately conservative: the previous 0.95 max
+    // erased detail and made the upgraded camera look out of focus.
   useEffect(() => {
     if (isAudio || !agora.joined) return;
     const engine = agora.engine?.current;
     if (!engine) return;
-    const levelToValue = (lvl) => [0, 0.3, 0.55, 0.75, 0.95][Math.max(0, Math.min(4, lvl))] || 0;
+    const levelToValue = (lvl) => [0, 0.16, 0.28, 0.40, 0.52][Math.max(0, Math.min(4, lvl))] || 0;
     const anyOn = (beautyLevels.smooth + beautyLevels.whiten + beautyLevels.redness + beautyLevels.sharp) > 0;
     try {
       engine.setBeautyEffectOptions(anyOn, {
@@ -1715,7 +2332,41 @@ export default function BroadcastRoomScreen() {
     } catch (e) {
       if (__DEV__) console.warn('Beauty effect failed:', e?.message);
     }
-  }, [agora.joined, isAudio, beautyLevels]);
+
+    // Face shaping ("makeup style" in Agora's own wording): contours and slims
+    // facial features. Not lipstick/AR makeup - that needs a licensed SDK - but
+    // it is the strongest built-in face enhancement available to us.
+    try {
+      engine.setFaceShapeBeautyOptions(faceShape.style > 0, {
+        shapeStyle: Math.max(0, faceShape.style - 1),
+        styleIntensity: Math.round((Math.max(0, Math.min(4, faceShape.intensity)) / 4) * 100),
+      });
+    } catch (e) {
+      if (__DEV__) console.warn('Face shape failed:', e?.message);
+    }
+
+    // Portrait segmentation blur. SegModelAi = 1 (no green screen required).
+    try {
+      engine.enableVirtualBackground(
+        bgBlur > 0,
+        { background_source_type: 3 /* BackgroundBlur */, blur_degree: Math.max(1, Math.min(3, bgBlur)) },
+        { modelType: 1 /* SegModelAi */ },
+      );
+    } catch (e) {
+      if (__DEV__) console.warn('Virtual background failed:', e?.message);
+    }
+
+    // Capture-quality helpers. These fix the "dark grainy room" look that no
+    // amount of smoothing helps, and cost far less CPU than the beauty pass.
+    try { engine.setLowlightEnhanceOptions(camEnhance.lowlight, { mode: 0, level: 0 }); } catch (_) {}
+    try { engine.setVideoDenoiserOptions(camEnhance.denoise, { mode: 0, level: 0 }); } catch (_) {}
+    try { engine.setColorEnhanceOptions(camEnhance.vivid, { strengthLevel: 0.5, skinProtectLevel: 0.75 }); } catch (_) {}
+    // agora.videoEpoch changes whenever the local video pipeline restarts
+    // (camera flip, camera re-enable, role switch, app resume). Agora drops the
+    // beauty effect on each of those, and nothing re-applied it - which is why
+    // beauty silently stopped part-way through a live while the stream itself
+    // carried on. Depending on the epoch re-applies it every time.
+  }, [agora.joined, isAudio, beautyLevels, faceShape, bgBlur, camEnhance, agora.videoEpoch]);
 
   // Reflect the real follow state for viewers when the room opens
   useEffect(() => {
@@ -1743,11 +2394,9 @@ export default function BroadcastRoomScreen() {
     // edge-to-edge Android (WindowInsets API), so the height is reliable.
     const keyboardDidShowListener = KeyboardEvents.addListener('keyboardDidShow', (e) => {
       setKeyboardVisible(true);
-      setKeyboardHeight(e.height);
     });
     const keyboardDidHideListener = KeyboardEvents.addListener('keyboardDidHide', () => {
       setKeyboardVisible(false);
-      setKeyboardHeight(0);
     });
 
     const timer = setTimeout(() => {
@@ -1814,14 +2463,13 @@ export default function BroadcastRoomScreen() {
           setPeakViewers(prev => Math.max(prev, viewers.length));
 
           // Viewer-side fast host-disconnect detection. `id` is the
-          // broadcaster's profile id (route param). If they're not in
-          // the presence state for 8 consecutive seconds, treat the
-          // live as ended. Catches force-quit / kill scenarios in ~8s
-          // instead of waiting on the 90s heartbeat cleanup.
+          // broadcaster's profile id (route param). If they're absent for
+          // the background grace period, ask the combined DB + Agora
+          // verifier whether the room truly ended.
           //
           // IMPORTANT: check allMembers, not the filtered `viewers`
           // (which now excludes the host). Otherwise hostPresent would
-          // always be false and the live would falsely "end" 8s after
+          // always be false and the live would falsely appear unhealthy after
           // every viewer joins.
           if (!isHostView && id) {
             const hostPresent = allMembers.some(v => v.id === id);
@@ -1833,18 +2481,8 @@ export default function BroadcastRoomScreen() {
             } else if (!hostMissingTimerRef.current) {
               hostMissingTimerRef.current = setTimeout(() => {
                 hostMissingTimerRef.current = null;
-                setIsLiveEndedForViewer(true);
-                // Also report the dead stream so the DB row flips to
-                // 'ended' for everyone. This stops other users from
-                // seeing the same ghost in the home grid and trying
-                // to join. The RPC's own staleness guard refuses to
-                // end a live with a recent heartbeat, so a buggy
-                // client can't kill a healthy room.
-                if (streamRecordId) {
-                  Promise.resolve(supabase.rpc('report_dead_stream', { p_stream_id: streamRecordId }))
-                    .catch(() => { /* best effort */ });
-                }
-              }, 8000);
+                scheduleViewerEndVerification('host-presence-timeout', 1500);
+              }, HOST_BACKGROUND_TIMEOUT_MS);
             }
           }
 
@@ -1868,25 +2506,40 @@ export default function BroadcastRoomScreen() {
             // Only when BOTH say a guest is gone do we kick them.
             // This eliminates the 5-7-minute auto-drop users reported
             // for audio listeners.
-            const presentIds = new Set(allMembers.map(v => v.id).filter(Boolean));
-            const agoraUidSet = new Set(agoraRemoteUidsRef.current || []);
-            const cur = activeGuestsRef.current;
-            let changed = false;
-            const next = cur.map(g => {
-              if (!g || !g.id) return g;
-              const inPresence = presentIds.has(g.id);
-              const inAgora    = agoraUidSet.has(agoraUidFromId(String(g.id)));
-              if (!inPresence && !inAgora) { changed = true; return null; }
-              return g;
-            });
-            if (changed) {
-              setActiveGuests(next);
+          const presentIds = new Set(allMembers.map(v => v.id).filter(Boolean));
+          latestPresenceIdsRef.current = presentIds;
+          const agoraUidSet = new Set(agoraRemoteUidsRef.current || []);
+          const cur = activeGuestsRef.current;
+          cur.forEach(g => {
+            if (!g || !g.id) return g;
+            const inPresence = presentIds.has(g.id);
+            const inAgora    = agoraUidSet.has(agoraUidFromId(String(g.id)));
+            const existingTimer = guestDisconnectTimersRef.current.get(g.id);
+            if (inPresence || inAgora) {
+              if (existingTimer) clearTimeout(existingTimer);
+              guestDisconnectTimersRef.current.delete(g.id);
+              return;
+            }
+            if (existingTimer) return;
+            const timer = setTimeout(() => {
+              guestDisconnectTimersRef.current.delete(g.id);
+              const stillPresent = latestPresenceIdsRef.current.has(g.id);
+              const stillInAgora = (agoraRemoteUidsRef.current || []).includes(agoraUidFromId(String(g.id)));
+              if (stillPresent || stillInAgora || !isHostView) return;
+              const currentSeats = activeGuestsRef.current;
+              if (!currentSeats.some((guest) => guest?.id === g.id)) return;
+              const nextSeats = currentSeats.map((guest) => guest?.id === g.id ? null : guest);
+              commitActiveGuests(nextSeats);
+              const seatRevision = nextSeatRevision();
+              const currentSlotCount = Number(roomStateRef.current.audioSlotCount || 8);
               channelRef.current?.send({
                 type: 'broadcast',
                 event: 'seat_update',
-                payload: { activeGuests: next },
+                payload: { activeGuests: nextSeats, audioSlotCount: currentSlotCount, seatRevision, reason: 'disconnected' },
               });
-            }
+            }, 25000);
+            guestDisconnectTimersRef.current.set(g.id, timer);
+          });
             // A (re)sync usually means someone just joined — push current room
             // state so late joiners see the right title/goal/lock/mute.
             broadcastRoomState();
@@ -1894,21 +2547,25 @@ export default function BroadcastRoomScreen() {
         }, 300);
       })
       .on('broadcast', { event: 'chat' }, ({ payload }) => {
-        setChats(prev => [payload, ...prev].slice(0, 50));
-        // Entrance messages auto-disappear after 3s so they feel like a
-        // brief greeting instead of cluttering the chat history.
-        if (payload?.type === 'entrance' && payload.id) {
-          setTimeout(() => {
-            setChats(prev => prev.filter(m => m.id !== payload.id));
-          }, 3000);
-        }
+        setChats((previous) => {
+          if (!payload?.id || previous.some((message) => String(message.id) === String(payload.id))) {
+            return previous;
+          }
+          return [payload, ...previous].slice(0, 50);
+        });
       })
       .on('broadcast', { event: 'gift' }, ({ payload }) => {
         if (payload.userId !== user?.id) {
           // Keep the Live Goal bar in sync for the host + all viewers
-          if (payload.hostValue) {
-            setEarnings(prev => prev + payload.hostValue);
-            setTotalGiftsReceived(prev => prev + (payload.count || 1));
+          if (payload.streamTotalEarnings != null && Number.isFinite(Number(payload.streamTotalEarnings))) {
+            setEarnings(Number(payload.streamTotalEarnings) || 0);
+          } else if (payload.hostEarningsDelta || payload.hostValue) {
+            setEarnings(prev => prev + Number(payload.hostEarningsDelta || payload.hostValue || 0));
+          }
+          if (payload.streamTotalGifts != null && Number.isFinite(Number(payload.streamTotalGifts))) {
+            setTotalGiftsReceived(Number(payload.streamTotalGifts) || 0);
+          } else if (payload.hostEarningsDelta || payload.hostValue) {
+            setTotalGiftsReceived(prev => prev + (Number(payload.count) || 1));
           }
           // Bump the per-seat earnings badge for every recipient the
           // sender included. Optimistic; the next 30s reconcile
@@ -1928,7 +2585,7 @@ export default function BroadcastRoomScreen() {
           // sender used a newer gift we don't know about, fall back to
           // a placeholder so the toast still appears — the viewer sees
           // *something* instead of the gift silently vanishing.
-          const found = GIFT_ITEMS.find(g => g.id === payload.giftId);
+          const found = giftItemsRef.current.find(g => g.id === payload.giftId);
           const gift = found || {
             id:    payload.giftId,
             name:  payload.name || 'Gift',
@@ -1945,20 +2602,7 @@ export default function BroadcastRoomScreen() {
               payload.userName || 'Someone',
               payload.userAvatar
             );
-            if (gift.source) {
-              const animId = `recv-${Date.now()}`;
-              setActiveGiftAnimation({ id: animId, source: gift.source, loop: gift.loop || false });
-              // Mirror the sender — viewers/host hear the same SFX. The
-              // `gift` object came from GIFT_ITEMS which now carries
-              // sound_path/sound_url too, so the resolver finds the file.
-              playGiftSound(gift);
-              // Always clear after a duration — even looping gifts must stop on
-              // the receiver side (otherwise they play forever for guests/viewers).
-              if (lottieTimeoutRef.current) clearTimeout(lottieTimeoutRef.current);
-              lottieTimeoutRef.current = setTimeout(() => {
-                setActiveGiftAnimation((prev) => prev.id === animId ? { id: null, source: null, loop: false } : prev);
-              }, gift.loop ? 4000 : (gift.customDuration || 3000));
-            }
+            enqueueGiftAnimation(gift, payload.count || 1, 'recv');
           }
         }
       })
@@ -1969,6 +2613,51 @@ export default function BroadcastRoomScreen() {
             return [...prev, payload];
           });
         }
+      })
+      .on('broadcast', { event: 'seat_claim' }, ({ payload }) => {
+        if (!isHostView || !payload?.guest?.id) return;
+        const requestedIndex = Number(payload.seatIdx);
+        const current = activeGuestsRef.current;
+        if (!Number.isInteger(requestedIndex) || requestedIndex < 0 || requestedIndex >= current.length) return;
+        if (current[requestedIndex] || roomStateRef.current.locked || roomStateRef.current.lockedSeats?.includes(requestedIndex)) return;
+        if (current.some((guest) => guest?.id === payload.guest.id)) return;
+        const next = [...current];
+        next[requestedIndex] = payload.guest;
+        commitActiveGuests(next);
+        const seatRevision = nextSeatRevision();
+        const currentSlotCount = Number(roomStateRef.current.audioSlotCount || 8);
+        channelRef.current?.send({
+          type: 'broadcast',
+          event: 'call_accepted',
+          payload: {
+            guestId: payload.guest.id,
+            seatIdx: requestedIndex,
+            activeGuests: next,
+            audioSlotCount: currentSlotCount,
+            seatRevision,
+          },
+        });
+        channelRef.current?.send({
+          type: 'broadcast',
+          event: 'seat_update',
+          payload: {
+            activeGuests: next,
+            audioSlotCount: currentSlotCount,
+            seatRevision,
+            reason: 'accepted',
+            acceptedGuestId: payload.guest.id,
+          },
+        });
+        const joinedMessage = {
+          id: `guest-joined-${payload.guest.id}-${Date.now()}`,
+          userId: payload.guest.id,
+          user: 'System',
+          type: 'entrance',
+          message: `${payload.guest.name || 'A guest'} joined the live`,
+          color: '#38BDF8',
+          createdAt: new Date().toISOString(),
+        };
+        channelRef.current?.send({ type: 'broadcast', event: 'chat', payload: joinedMessage });
       })
       .on('broadcast', { event: 'call_cancel' }, ({ payload }) => {
         // Guest withdrew their request before the host acted on it
@@ -1984,29 +2673,44 @@ export default function BroadcastRoomScreen() {
         }
       })
       .on('broadcast', { event: 'call_accepted' }, ({ payload }) => {
+        const revision = Number(payload.seatRevision || 0);
+        if (!shouldApplyRealtimeRevision(seatRevisionRef.current, revision)) return;
+        if (revision) seatRevisionRef.current = revision;
+        const acceptedSlotCount = Number(payload.audioSlotCount || roomStateRef.current.audioSlotCount || 8);
         if (typeof payload.audioSlotCount === 'number') setAudioSlotCount(payload.audioSlotCount);
-        setActiveGuests(resizeGuestSeats(payload.activeGuests, payload.audioSlotCount || audioSlotCount));
+        commitActiveGuests(resizeAudioGuestSeats(payload.activeGuests, acceptedSlotCount));
         if (payload.guestId === user?.id) {
           // Just go live on the seat — no popup.
+          callStatusRef.current = 'accepted';
           setCallRequestStatus('accepted');
         }
       })
       .on('broadcast', { event: 'seat_update' }, ({ payload }) => {
-        const nextSlotCount = typeof payload.audioSlotCount === 'number' ? payload.audioSlotCount : audioSlotCount;
+        const revision = Number(payload.seatRevision || 0);
+        if (!shouldApplyRealtimeRevision(seatRevisionRef.current, revision)) return;
+        if (revision) seatRevisionRef.current = revision;
+        const nextSlotCount = Number(payload.audioSlotCount || roomStateRef.current.audioSlotCount || 8);
         if (typeof payload.audioSlotCount === 'number') {
           setAudioSlotCount(nextSlotCount);
           setSlotInput(String(nextSlotCount));
         }
-        setActiveGuests(resizeGuestSeats(payload.activeGuests, nextSlotCount));
+        const nextSeats = commitActiveGuests(resizeAudioGuestSeats(payload.activeGuests, nextSlotCount));
+        if (!isHostView && payload.reason === 'accepted' && payload.acceptedGuestId === user?.id) {
+          callStatusRef.current = 'accepted';
+          setCallRequestStatus('accepted');
+        }
         // If I was on a seat and I'm no longer in the new layout, the host
         // kicked/blocked me â†’ drop back to audience and stop publishing.
         if (!isHostView && callStatusRef.current === 'accepted' &&
-          !resizeGuestSeats(payload.activeGuests, nextSlotCount).some(g => g && g.id === user?.id)) {
+          !nextSeats.some(g => g && g.id === user?.id)) {
+          callStatusRef.current = 'idle';
           setCallRequestStatus('idle');
           setIsSelfMuted(false);
           setForcedMuted(false);
-          try { agora.setPublishing(false); } catch (e) { if (__DEV__) console.warn('broadcast cleanup:', e?.message); }
-          showCuteAlert('Removed from call', 'The host has removed you from the call.');
+          try { setAgoraPublishing(false); } catch (e) { if (__DEV__) console.warn('broadcast cleanup:', e?.message); }
+          if (payload.reason === 'host_removed') {
+            showCuteAlert('Removed from call', 'The host has removed you from the call.');
+          }
         }
       })
       .on('broadcast', { event: 'force_mute' }, ({ payload }) => {
@@ -2030,7 +2734,7 @@ export default function BroadcastRoomScreen() {
       .on('broadcast', { event: 'guest_video' }, ({ payload }) => {
         // A guest toggled their camera mid-stream — flip their tile to / from
         // the audio-mode placeholder so the layout stays clean for everyone.
-        setActiveGuests(prev => prev.map(g => (g && g.id === payload.guestId)
+        commitActiveGuests(prev => prev.map(g => (g && g.id === payload.guestId)
           ? { ...g, videoEnabled: !!payload.videoEnabled }
           : g));
       })
@@ -2039,24 +2743,42 @@ export default function BroadcastRoomScreen() {
         // entrance banner. The dedupe key on `id + ts` keeps quick re-joins
         // from stacking. We trust the sender to only fire when active.
         if (!payload?.id || !payload?.type) return;
-        setEntranceBanner({
+        setEntranceBannerQueue((current) => [...current, {
           name: payload.name || 'VIP',
           type: payload.type,
           level: payload.level || 1,
           avatar: payload.avatar,
-        });
+        }].slice(-8));
       })
       .on('broadcast', { event: 'mall_intro' }, ({ payload }) => {
-        if (!payload?.id || !payload?.videoUrl) return;
+        if (!payload?.id || (!payload?.videoUrl && !payload?.introId)) return;
         const introLiveKey = String(payload.liveStreamId || streamRecordId || id);
         const eventKey = payload.eventKey || `${introLiveKey}:${payload.id}:${payload.ts || Date.now()}`;
         if (playedMallIntroUserIdsRef.current.has(eventKey)) return;
         playedMallIntroUserIdsRef.current.add(eventKey);
-        queueMallIntro({
-          id: eventKey,
-          name: payload.name || 'Special entrance',
-          videoUrl: payload.videoUrl,
-          audioUrl: payload.audioUrl || payload.audio_url || null,
+        void resolveAssignedMallIntroRef.current({
+          selectedMallIntro: payload.introId || null,
+          selectedMallIntroVideoUrl: payload.videoUrl || null,
+          selectedMallIntroThumbnailUrl: payload.thumbnailUrl || null,
+        }).then((resolvedIntro) => {
+          if (!channelRef.current) return;
+          if (payload.liveStreamId && String(streamRecordIdRef.current || '') !== String(payload.liveStreamId)) return;
+          queueMallIntro({
+            id: eventKey,
+            name: payload.name || 'Special entrance',
+            // A null source intentionally invokes the bundled fallback video.
+            videoUrl: resolvedIntro.videoUrl || null,
+            audioUrl: payload.audioUrl || payload.audio_url || null,
+          });
+        }).catch(() => {
+          if (!channelRef.current) return;
+          if (payload.liveStreamId && String(streamRecordIdRef.current || '') !== String(payload.liveStreamId)) return;
+          queueMallIntro({
+            id: eventKey,
+            name: payload.name || 'Special entrance',
+            videoUrl: null,
+            audioUrl: payload.audioUrl || payload.audio_url || null,
+          });
         });
       })
       .on('broadcast', { event: 'admin_room_block' }, ({ payload }) => {
@@ -2065,7 +2787,7 @@ export default function BroadcastRoomScreen() {
           || (Array.isArray(payload?.blockedUsers) && payload.blockedUsers.includes(user?.id));
         if (blocked && !ejectedRef.current) {
           ejectedRef.current = true;
-          try { agora.setPublishing(false); } catch (e) { if (__DEV__) console.warn('broadcast cleanup:', e?.message); }
+          try { setAgoraPublishing(false); } catch (e) { if (__DEV__) console.warn('broadcast cleanup:', e?.message); }
           showCuteAlert('Removed', 'You have been blocked from this live.');
           router.replace('/main/(tabs)/');
         }
@@ -2074,12 +2796,15 @@ export default function BroadcastRoomScreen() {
         // Viewers/guests mirror the host's synced controls (title, goal,
         // seat-lock, host mute, admin list).
         if (isHostView) return;
+        const incomingRoomStateRevision = Number(payload.roomStateRevision || 0);
+        if (!shouldApplyRealtimeRevision(roomStateRevisionRef.current, incomingRoomStateRevision)) return;
+        if (incomingRoomStateRevision) roomStateRevisionRef.current = incomingRoomStateRevision;
         // Blocked for this live session â†’ bounce out of the room. The block
         // list is in-memory on the host, so it clears if the host restarts.
         if (Array.isArray(payload.blockedUsers) && payload.blockedUsers.includes(user?.id)) {
           if (!ejectedRef.current) {
             ejectedRef.current = true;
-            try { agora.setPublishing(false); } catch (e) { if (__DEV__) console.warn('broadcast cleanup:', e?.message); }
+            try { setAgoraPublishing(false); } catch (e) { if (__DEV__) console.warn('broadcast cleanup:', e?.message); }
             showCuteAlert('Removed', 'The host has blocked you from this live.');
             router.replace('/main/(tabs)/');
           }
@@ -2087,6 +2812,9 @@ export default function BroadcastRoomScreen() {
         }
         if (typeof payload.title === 'string') setRoomTitle(payload.title);
         if (typeof payload.goal === 'number') setLiveGoal(payload.goal);
+        if (Number.isFinite(Number(payload.earnings))) {
+          setEarnings((current) => Math.max(current, Number(payload.earnings) || 0));
+        }
         setIsSeatsLocked(!!payload.locked);
         if (Array.isArray(payload.lockedSeats)) setLockedSeats(payload.lockedSeats);
         setHostMuted(!!payload.hostMuted);
@@ -2095,19 +2823,47 @@ export default function BroadcastRoomScreen() {
           setAudioSlotCount(payload.audioSlotCount);
           setSlotInput(String(payload.audioSlotCount));
         }
-        // Adopt the host's current seat snapshot. This is the late-
-        // joining viewer's only chance to see who's already on call
-        // before the next seat_update event fires. Guarded so an
-        // accepted call user (who has authoritative local state from
-        // having just claimed their seat) doesn't get overwritten by
-        // a stale broadcast that hadn't yet rolled them in.
-        if (Array.isArray(payload.activeGuests) && callStatusRef.current !== 'accepted') {
-          setActiveGuests(resizeGuestSeats(payload.activeGuests, payload.audioSlotCount || audioSlotCount));
+        // Adopt the host's current versioned seat snapshot. This also repairs
+        // a missed call_accepted/seat_update broadcast after a reconnect.
+        const roomRevision = Number(payload.seatRevision || 0);
+        const isCurrentRoomState = shouldApplyRealtimeRevision(seatRevisionRef.current, roomRevision);
+        if (roomRevision) seatRevisionRef.current = Math.max(seatRevisionRef.current, roomRevision);
+        if (Array.isArray(payload.activeGuests) && isCurrentRoomState) {
+          const nextSeats = commitActiveGuests(resizeAudioGuestSeats(payload.activeGuests, payload.audioSlotCount || roomStateRef.current.audioSlotCount || 8));
+          const hasOwnSeat = nextSeats.some((guest) => guest?.id === user?.id);
+          if (hasOwnSeat && callStatusRef.current !== 'accepted') {
+            callStatusRef.current = 'accepted';
+            setCallRequestStatus('accepted');
+          } else if (!hasOwnSeat && callStatusRef.current === 'accepted') {
+            callStatusRef.current = 'idle';
+            setCallRequestStatus('idle');
+            setIsSelfMuted(false);
+            setForcedMuted(false);
+            try { setAgoraPublishing(false); } catch (e) { if (__DEV__) console.warn('broadcast cleanup:', e?.message); }
+          }
+        }
+        if (payload.activeLuckyBag?.id
+            && luckyBagBelongsToLive(payload.activeLuckyBag, id, streamRecordIdRef.current)) {
+          const age = Date.now() - new Date(payload.activeLuckyBag.dropAt || 0).getTime();
+          if (Number.isFinite(age) && age >= 0 && age < 75000) {
+            setActiveLuckyBag(payload.activeLuckyBag);
+            scheduleLuckyBagExpiry(payload.activeLuckyBag.id, Math.max(0, 75000 - age));
+          }
         }
       })
       .on('broadcast', { event: 'seat_leave' }, ({ payload }) => {
-        // A guest left their seat (e.g. closed the room) — free their slot.
-        setActiveGuests(prev => prev.map(g => (g && g.id === payload.guestId) ? null : g));
+        // The host turns a targeted leave request into one authoritative,
+        // versioned seat snapshot. Viewers wait for that snapshot.
+        if (!isHostView) return;
+        const next = activeGuestsRef.current.map(g => (g && g.id === payload.guestId) ? null : g);
+        commitActiveGuests(next);
+        const seatRevision = nextSeatRevision();
+        const currentSlotCount = Number(roomStateRef.current.audioSlotCount || 8);
+        channelRef.current?.send({
+          type: 'broadcast',
+          event: 'seat_update',
+          payload: { activeGuests: next, audioSlotCount: currentSlotCount, seatRevision },
+        });
       })
       .on('broadcast', { event: 'lucky_bag_dropped' }, ({ payload }) => {
         // Someone in the room dropped a lucky bag. dropAt is the ISO
@@ -2119,7 +2875,8 @@ export default function BroadcastRoomScreen() {
         // reveal — keeps players from camping a fixed tap target.
         // Falls back to "open immediately" if dropAt is missing (old
         // APK still in the room), so mixed-version rooms stay usable.
-        if (!payload?.bagId) return;
+        if (!payload?.bagId
+            || !luckyBagBelongsToLive(payload, id, streamRecordIdRef.current)) return;
         setActiveLuckyBag({
           id:          payload.bagId,
           perWinner:   payload.perWinner,
@@ -2127,18 +2884,31 @@ export default function BroadcastRoomScreen() {
           droppedBy:   payload.droppedBy,
           dropperName: payload.dropperName,
           dropAt:      payload.dropAt || new Date().toISOString(),
+          roomId:       payload.roomId,
+          streamId:     payload.streamId,
           posX:        typeof payload.posX === 'number' ? payload.posX : 0.5,
           posY:        typeof payload.posY === 'number' ? payload.posY : 0.42,
         });
         // 60-second total visibility (15s reveal + 45s claim window
         // ish) — keep the local timeout so an idle bag eventually
         // disappears even for users who don't claim.
-        setTimeout(() => setActiveLuckyBag(prev => (prev && prev.id === payload.bagId) ? null : prev), 75000);
+        scheduleLuckyBagExpiry(payload.bagId, 75000);
       })
-      .on('broadcast', { event: 'end_live' }, () => {
-        if (!isHostView) {
-          setIsLiveEndedForViewer(true);
+      .on('broadcast', { event: 'end_live' }, ({ payload }) => {
+        // The room uses broadcast.self=true. A host therefore receives its
+        // own normal end event too; only an explicitly admin-originated event
+        // should force-navigate the host instead of showing their summary.
+        if (isHostView) {
+          if (payload?.admin) handleAdminForcedEnd();
+          return;
         }
+        // Broadcast is only a wake-up signal. It can be delayed across a host
+        // reconnect and old APKs do not include a stream id, so never treat it
+        // as terminal without checking the active DB row and Agora media.
+        const endedStreamId = payload?.streamId ? String(payload.streamId) : null;
+        const currentStreamId = streamRecordIdRef.current ? String(streamRecordIdRef.current) : null;
+        if (endedStreamId && currentStreamId && endedStreamId !== currentStreamId) return;
+        scheduleViewerEndVerification('end-live-broadcast', 350);
       })
       .on('broadcast', { event: 'sfx' }, ({ payload }) => {
         // Play the sound for everyone EXCEPT the sender (they already heard it
@@ -2186,11 +2956,15 @@ export default function BroadcastRoomScreen() {
             // users who expect 202701-format IDs.
             displayId: user?.displayId || null,
             name: user?.name || 'Visitor',
+            nickname: user?.nickname || null,
             avatar: user?.avatar || 'https://picsum.photos/seed/visitor/100/100',
             level: user?.level || 1,
             isVIP: !!user?.vipType,
             vipType: user?.vipType || 'none',
             vipExpiresAt: user?.vipExpiresAt || null,
+            commentTagId: user?.commentTagId || null,
+            commentTagName: user?.commentTagName || null,
+            commentTagUrl: user?.commentTagUrl || null,
             selectedProfileFrame: user?.selectedProfileFrame || null,
             selectedProfileFrameUrl: user?.selectedProfileFrameUrl || null,
             selectedMallIntro: user?.selectedMallIntro || null,
@@ -2204,16 +2978,19 @@ export default function BroadcastRoomScreen() {
           // Announce a viewer's entrance to the WHOLE room (host + everyone).
           // self:true means the joining viewer also receives + shows it.
           if (!isHostView) {
+            const entranceMessage = {
+              id: `enter-${user?.id}-${Date.now()}`,
+              userId: user?.id,
+              user: 'System',
+              type: 'entrance',
+              message: `${user?.name || 'A viewer'} has entered the room`,
+              color: '#38BDF8',
+              createdAt: new Date().toISOString(),
+            };
             channel.send({
               type: 'broadcast',
               event: 'chat',
-              payload: {
-                id: `enter-${user?.id}-${Date.now()}`,
-                user: 'System',
-                type: 'entrance',
-                message: `${user?.name || 'A viewer'} has entered the room`,
-                color: '#38BDF8',
-              },
+              payload: entranceMessage,
             });
 
             broadcastMallIntroForUser(user);
@@ -2268,6 +3045,9 @@ export default function BroadcastRoomScreen() {
       }
       if (simulationIntervalRef.current) clearInterval(simulationIntervalRef.current);
       if (lottieTimeoutRef.current) clearTimeout(lottieTimeoutRef.current);
+      if (giftAnimationTimerRef.current) clearTimeout(giftAnimationTimerRef.current);
+      giftAnimationQueueRef.current = [];
+      giftAnimationBusyRef.current = false;
       if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
       if (comboTimeoutRef.current) clearTimeout(comboTimeoutRef.current);
       // Drop a pending presence-sync tick so it doesn't fire on an
@@ -2276,6 +3056,8 @@ export default function BroadcastRoomScreen() {
         clearTimeout(presenceSyncTimerRef.current);
         presenceSyncTimerRef.current = null;
       }
+      guestDisconnectTimersRef.current.forEach((disconnectTimer) => clearTimeout(disconnectTimer));
+      guestDisconnectTimersRef.current.clear();
       // Cancel the host-missing grace timer too — otherwise leaving
       // the room mid-detection (e.g. user backed out before the 8s
       // elapsed) would still set "live ended" on a stale screen.
@@ -2288,6 +3070,10 @@ export default function BroadcastRoomScreen() {
       if (joinTimeoutRef.current) {
         clearTimeout(joinTimeoutRef.current);
         joinTimeoutRef.current = null;
+      }
+      if (endedVerificationTimerRef.current) {
+        clearTimeout(endedVerificationTimerRef.current);
+        endedVerificationTimerRef.current = null;
       }
       // Cancel the just-followed badge fallback so it doesn't fire
       // post-unmount on a stale setJustFollowedHost reference.
@@ -2320,14 +3106,39 @@ export default function BroadcastRoomScreen() {
   // swipe out of their own stream). On navigation we use router.replace
   // so the broadcast screen unmounts cleanly — Agora teardown happens
   // automatically via the existing cleanup effect.
-  const siblingIds = useMemo(
+  const fallbackSiblingIds = useMemo(
     () => (siblingsCsv ? String(siblingsCsv).split(',').filter(Boolean) : []),
     [siblingsCsv]
   );
+  const [dynamicSiblingIds, setDynamicSiblingIds] = useState([]);
+  const siblingIds = dynamicSiblingIds.length ? dynamicSiblingIds : fallbackSiblingIds;
+  const loadDynamicSiblings = useCallback(async () => {
+    if (isHostView) return;
+    const { data, error } = await supabase.rpc('get_active_live_feed', {
+      p_tag: feedTag ? String(feedTag) : null,
+      p_type: feedType ? String(feedType) : null,
+      p_country: feedCountry ? String(feedCountry) : null,
+      p_offset: 0,
+      p_limit: 50,
+    });
+    if (!error) {
+      const ids = (data || []).map((row) => String(row.broadcaster_id)).filter(Boolean);
+      setDynamicSiblingIds(ids.includes(String(id)) ? ids : [String(id), ...ids]);
+    }
+  }, [isHostView, feedTag, feedType, feedCountry, id]);
+  useEffect(() => {
+    loadDynamicSiblings();
+    if (isHostView) return undefined;
+    const channel = supabase.channel(`live-swipe-feed-${id}-${Date.now()}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'live_streams' }, loadDynamicSiblings)
+      .subscribe();
+    return () => { try { supabase.removeChannel(channel); } catch (_) {} };
+  }, [loadDynamicSiblings, isHostView, id]);
   const currentIdx = useMemo(() => {
+    const dynamicIndex = siblingIds.indexOf(String(id));
+    if (dynamicIndex >= 0) return dynamicIndex;
     const n = parseInt(String(myIdxStr || ''), 10);
-    if (Number.isFinite(n)) return n;
-    return siblingIds.indexOf(String(id));
+    return Number.isFinite(n) ? n : 0;
   }, [myIdxStr, siblingIds, id]);
 
   const navigateToSibling = (delta) => {
@@ -2343,11 +3154,23 @@ export default function BroadcastRoomScreen() {
       params: {
         siblings: siblingsCsv || '',
         myIdx:    String(nextIdx),
+        feedTag: feedTag || '',
+        feedType: feedType || '',
+        feedCountry: feedCountry || '',
       },
     });
   };
   const navigateRef = useRef(navigateToSibling);
   useEffect(() => { navigateRef.current = navigateToSibling; });
+
+  const swipeBlockedRef = useRef(false);
+  useEffect(() => {
+    swipeBlockedRef.current = isKeyboardVisible || showGiftMenu || showTopUpModal || showSlotModal ||
+      showBlockedSheet || showRankingSheet || showGoalModal || showViewersModal || !!selectedViewer ||
+      showHostModal || showBeautySheet || showMusicModal || gameSheetOpen;
+  }, [isKeyboardVisible, showGiftMenu, showTopUpModal, showSlotModal, showBlockedSheet,
+    showRankingSheet, showGoalModal, showViewersModal, selectedViewer, showHostModal,
+    showBeautySheet, showMusicModal, gameSheetOpen]);
 
   const panResponder = useRef(
     PanResponder.create({
@@ -2357,7 +3180,7 @@ export default function BroadcastRoomScreen() {
       // it before this layer ever sees them.
       onStartShouldSetPanResponder: () => false,
       onMoveShouldSetPanResponder: (_e, gs) =>
-        Math.abs(gs.dy) > 30 && Math.abs(gs.dy) > Math.abs(gs.dx) * 1.5,
+        !swipeBlockedRef.current && Math.abs(gs.dy) > 30 && Math.abs(gs.dy) > Math.abs(gs.dx) * 1.5,
       onPanResponderRelease: (_e, gs) => {
         if (gs.dy < -100)      navigateRef.current(1);  // swipe up   → next
         else if (gs.dy > 100)  navigateRef.current(-1); // swipe down → prev
@@ -2430,11 +3253,7 @@ export default function BroadcastRoomScreen() {
     }
   };
 
-  const getAudioVisitors = () => {
-    if (!isAudio) return roomViewers;
-    const seatedIds = new Set(activeGuests.filter(Boolean).map(g => g.id));
-    return roomViewers.filter(v => v?.id && v.id !== stream.id && !seatedIds.has(v.id));
-  };
+  const getAudioVisitors = () => roomViewers.filter(v => v?.id && v.id !== stream.id);
 
   const openProfilePopup = async (person) => {
     const targetId = person?.id === 'host' ? stream.id : person?.id;
@@ -2575,11 +3394,19 @@ export default function BroadcastRoomScreen() {
         id: Date.now().toString() + '-' + Math.random().toString(36).substring(2, 11),
         userId: user?.id,
         user: user?.name || 'User',
+        avatar: user?.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.id || 'user'}`,
+        firstName: (user?.name || 'User').trim().split(/\s+/)[0],
+        nickname: user?.nickname || null,
+        level: Math.max(1, Number(user?.level) || 1),
+        commentTagId: user?.commentTagId || null,
+        commentTagName: user?.commentTagName || null,
+        commentTagUrl: user?.commentTagUrl || null,
         type: 'user',
         message: cleanMessage,
         color: isHostView ? '#FBBF24' : '#FFFFFF',
         isHost: isHostView,
         vipType: activeVip,
+        createdAt: new Date().toISOString(),
       };
 
       if (channelRef.current) {
@@ -2599,36 +3426,45 @@ export default function BroadcastRoomScreen() {
 
   // Update the seat layout locally AND broadcast it so the host + every
   // viewer stay in sync (used by kick / block / remove / leave).
-  const applySeats = (next) => {
-    setActiveGuests(next);
+  const applySeats = (next, reason = 'host_removed') => {
+    commitActiveGuests(next);
     if (channelRef.current) {
+      const seatRevision = nextSeatRevision();
       channelRef.current.send({
         type: 'broadcast',
         event: 'seat_update',
-        payload: { activeGuests: next, audioSlotCount },
+        payload: { activeGuests: next, audioSlotCount, seatRevision, reason },
       });
     }
   };
 
-  const resizeGuestSeats = (seats, totalSlots) => {
-    const nextGuestSlots = Math.max(1, Math.min(11, Number(totalSlots) - 1));
-    const next = Array.isArray(seats) ? seats.slice(0, nextGuestSlots) : [];
-    while (next.length < nextGuestSlots) next.push(null);
-    return next;
-  };
-
-  const applyAudioSlotCount = (nextTotalSlots) => {
+  const applyAudioSlotCount = async (nextTotalSlots) => {
     const normalized = Math.max(2, Math.min(12, Number(nextTotalSlots) || 8));
-    const resizedSeats = resizeGuestSeats(activeGuestsRef.current, normalized);
+    const resizedSeats = resizeAudioGuestSeats(activeGuestsRef.current, normalized);
+    if (isHostView) {
+      if (!streamRecordId) {
+        showCuteAlert('Seat count not saved', 'The live room is still connecting. Please try again.');
+        return;
+      }
+      const { data, error } = await supabase.rpc('set_audio_slot_count', {
+        p_stream_id: streamRecordId,
+        p_slot_count: normalized,
+      });
+      if (error || data?.success === false) {
+        showCuteAlert('Seat count not saved', error?.message || data?.message || 'Please try again.');
+        return;
+      }
+    }
     setAudioSlotCount(normalized);
     setSlotInput(String(normalized));
-    setActiveGuests(resizedSeats);
+    commitActiveGuests(resizedSeats);
     setLockedSeats(prev => prev.filter(i => i < normalized - 1));
     if (channelRef.current) {
+      const seatRevision = nextSeatRevision();
       channelRef.current.send({
         type: 'broadcast',
         event: 'seat_update',
-        payload: { activeGuests: resizedSeats, audioSlotCount: normalized },
+        payload: { activeGuests: resizedSeats, audioSlotCount: normalized, seatRevision },
       });
     }
   };
@@ -2666,7 +3502,7 @@ export default function BroadcastRoomScreen() {
   // actually wrote to the DB — it just bumped local state, vanished
   // on refresh, and confused hosts who thought they were paid in
   // diamonds. The REAL reward is server-side: migration 81's
-  // live_stream_heartbeat grants 6,000 beans the moment a video stream
+  // live_stream_heartbeat grants 5,000 beans the moment a video stream
   // crosses 60 minutes, atomically via live_streams.hour_reward_credited.
   // We read that flag back here so the summary shows the real
   // reward exactly when it actually landed in the wallet.
@@ -2684,7 +3520,7 @@ export default function BroadcastRoomScreen() {
         channelRef.current.send({
           type: 'broadcast',
           event: 'end_live',
-          payload: { id: user?.id },
+          payload: { id: user?.id, streamId: streamRecordId || null },
         });
       } catch (_) {}
     }
@@ -2701,19 +3537,22 @@ export default function BroadcastRoomScreen() {
 
     if (streamRecordId) {
       try {
+        const rewardRead = !isAudio
+          ? supabase.from('host_daily_live_rewards')
+              .select('reward_beans,rewarded_at')
+              .eq('user_id', user?.id)
+              .eq('reward_date', new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Dhaka' }).format(new Date()))
+              .maybeSingle()
+          : Promise.resolve({ data: null });
         const [, hourReadResult] = await Promise.all([
           endLiveStream(streamRecordId, peakViewers).catch((e) => {
             if (__DEV__) console.warn('broadcast cleanup:', e?.message);
             return null;
           }),
-          supabase
-            .from('live_streams')
-            .select('hour_reward_credited')
-            .eq('id', streamRecordId)
-            .maybeSingle(),
+          rewardRead,
         ]);
-        if (hourReadResult?.data?.hour_reward_credited) {
-          setFinalSummaryData((prev) => ({ ...prev, hourBeans: 6000 }));
+        if (!isAudio && hourReadResult?.data?.rewarded_at) {
+          setFinalSummaryData((prev) => ({ ...prev, hourBeans: Number(hourReadResult.data.reward_beans || 0) }));
         }
       } catch (_) {}
     }
@@ -2728,7 +3567,7 @@ export default function BroadcastRoomScreen() {
     setIsSelfMuted(false);
     setForcedMuted(false);
     // Local-only state flip so this device sees the seat free instantly.
-    setActiveGuests(prev => prev.map(g => (g && g.id === user?.id) ? null : g));
+    commitActiveGuests(prev => prev.map(g => (g && g.id === user?.id) ? null : g));
     // Broadcast a TARGETED seat_leave (just our guestId) instead of the
     // full activeGuests array. The full-array path used to race against
     // the host's promote-new-guest seat_update: if a guest left mid-promote,
@@ -2746,7 +3585,7 @@ export default function BroadcastRoomScreen() {
       } catch (e) { if (__DEV__) console.warn('broadcast cleanup:', e?.message); }
     }
     // Stop publishing (back to audience)
-    agora.setPublishing(false);
+    setAgoraPublishing(false);
   };
 
   // ----- REAL-TIME ECONOMY LOGIC & TOAST -----
@@ -2792,6 +3631,35 @@ export default function BroadcastRoomScreen() {
   // doesn't see the second tap pass the local guard only to hit a server
   // "Insufficient diamonds" error 200ms later.
   const pendingSpendRef = useRef(0);
+
+  // Every device plays one gift animation at a time. Realtime events from
+  // multiple gifters are appended instead of replacing the animation already
+  // on screen, so a busy room visibly processes the queue in arrival order.
+  function playNextGiftAnimation() {
+    if (giftAnimationBusyRef.current) return;
+    const next = giftAnimationQueueRef.current.shift();
+    if (!next) return;
+    giftAnimationBusyRef.current = true;
+    const { gift, multiplier, prefix } = next;
+    const animId = `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    if (gift.source) setActiveGiftAnimation({ id: animId, source: gift.source, loop: gift.loop || false });
+    playGiftSound(gift);
+    const duration = multiplier > 1 ? 4000 : (gift.loop ? 4000 : (gift.customDuration || 3000));
+    giftAnimationTimerRef.current = setTimeout(() => {
+      setActiveGiftAnimation((current) => current.id === animId ? { id: null, source: null, loop: false } : current);
+      giftAnimationBusyRef.current = false;
+      giftAnimationTimerRef.current = null;
+      playNextGiftAnimation();
+    }, duration);
+  }
+
+  function enqueueGiftAnimation(gift, multiplier = 1, prefix = 'gift') {
+    giftAnimationQueueRef.current.push({ gift, multiplier, prefix });
+    // Bound pathological bursts while retaining the newest room activity.
+    if (giftAnimationQueueRef.current.length > 40) giftAnimationQueueRef.current.shift();
+    playNextGiftAnimation();
+  }
+
   const handleSendGift = async (gift, multiplier = 1) => {
     const now = Date.now();
     if (isProcessingGift || now - lastGiftTimeRef.current < 400) {
@@ -2806,17 +3674,19 @@ export default function BroadcastRoomScreen() {
     }
     lastGiftTimeRef.current = now;
 
-    // Resolve recipients. When the SENDER is the host we drop the host
-    // tile from "All" — they're not allowed to gift themselves through
-    // a broadcast-to-all either.
+    // Resolve recipients. "All" stays a broadcast to everyone ELSE — a host
+    // never self-gifts by accident through it. Gifting yourself is only ever
+    // the explicit 'host' tile, which the host sees while Super Admin has
+    // self-gifting switched on.
     let targets = [];
     const activeOccupied = activeGuests.filter(g => g !== null);
+    const allowSelfGift = isHostView && selfGiftingEnabled;
 
     if (giftRecipients.includes('all')) {
       const hostTile = isHostView ? [] : [{ id: 'host', name: stream.broadcasterName }];
       targets = [...hostTile, ...activeOccupied];
     } else {
-      if (giftRecipients.includes('host') && !isHostView) {
+      if (giftRecipients.includes('host') && (!isHostView || allowSelfGift)) {
         targets.push({ id: 'host', name: stream.broadcasterName });
       }
       activeOccupied.forEach(g => {
@@ -2829,14 +3699,41 @@ export default function BroadcastRoomScreen() {
       return;
     }
 
-    const targetCount = targets.length;
+    // Resolve aliases and deduplicate before computing cost. The batch RPC
+    // requires a unique UUID list and charges exactly this list. The sender is
+    // dropped unless this is a host self-gifting inside their own live — the
+    // server re-checks the switch, the "own live" rule and the daily ceiling,
+    // so this only decides what we bother sending.
+    const broadcasterId = stream.id;
+    const seenRecipientIds = new Set();
+    const resolvedTargets = targets.map(t => ({
+      ...t,
+      resolvedId: t.id === 'host' ? broadcasterId : t.id,
+    })).filter((t) => {
+      if (!t.resolvedId || seenRecipientIds.has(t.resolvedId)) return false;
+      const isSelf = t.resolvedId === user?.id;
+      if (isSelf && !(allowSelfGift && t.resolvedId === broadcasterId)) return false;
+      seenRecipientIds.add(t.resolvedId);
+      return true;
+    });
+
+    if (resolvedTargets.length === 0) {
+      showCuteAlert("Can't gift yourself", "Pick a guest on the seats or wait for the host to be someone else.");
+      return;
+    }
+
+    const targetCount = resolvedTargets.length;
     const perRecipientCost = gift.price * multiplier;
     const totalCost = perRecipientCost * targetCount;
     // The Live Goal tracks gifts sent to the HOST. Only the host's share of
     // this gift counts toward the goal (and gets broadcast so everyone's
     // goal bar stays in sync — host, sender and viewers).
+    // A host's own self-gift only moves the goal when Super Admin lets
+    // self-gifts count, so this fallback matches the authoritative
+    // host_earnings_delta the server returns alongside it.
     const hostIsTarget = targets.some(t => t.id === 'host');
-    const hostValue = hostIsTarget ? perRecipientCost : 0;
+    const hostGiftCounts = !allowSelfGift || selfGiftCountsTowardEarnings;
+    const hostValue = (hostIsTarget && hostGiftCounts) ? perRecipientCost : 0;
 
     // Effective balance subtracts gifts that have already been sent but
     // for which the profile realtime UPDATE hasn't landed yet. Without
@@ -2847,41 +3744,29 @@ export default function BroadcastRoomScreen() {
     // same friendly message we'd show for an actually-poor user.
     const effectiveDiamonds = myDiamonds - pendingSpendRef.current;
     if (effectiveDiamonds >= totalCost && totalCost >= 0) {
-      // Resolve 'host' string -> actual broadcaster UUID
-      const broadcasterId = stream.id;
-      const resolvedTargets = targets.map(t => ({
-        ...t,
-        resolvedId: t.id === 'host' ? broadcasterId : t.id,
-      })).filter((t) => {
-        // Drop self-targets so a viewer who somehow ends up with themselves
-        // in the recipient list (host opening their own picker, a guest
-        // taking a seat and tapping their own tile) can't credit themselves.
-        // The server-side migration 49 guard is the authoritative defence;
-        // this is just so the UI doesn't show a fake "sent" state.
-        return t.resolvedId && t.resolvedId !== user?.id;
-      });
-
-      if (resolvedTargets.length === 0) {
-        showCuteAlert("Can't gift yourself", "Pick a guest on the seats or wait for the host to be someone else.");
-        return;
-      }
-
-      // PROD-LEVEL: send one RPC per recipient. If any fails, stop.
+      // One atomic RPC validates/debits once and credits every selected
+      // recipient, removing the old 4–5 second ALL-recipient waterfall.
       // Reserve the spend so a concurrent rapid second send doesn't
       // double-count. The release is in `finally` so an error path
       // doesn't leak the reservation forever.
       setIsProcessingGift(true);
       pendingSpendRef.current += totalCost;
       let anyFailed = false;
+      let authoritativeGiftResult = null;
       try {
-        for (const t of resolvedTargets) {
-          if (!t.resolvedId) continue;
-          const ok = await sendGiftSecurely(t.resolvedId, gift.id, perRecipientCost, {
-            roomId: streamRecordId,
-            giftName: gift.name,
-            count: multiplier,
-          });
-          if (!ok) { anyFailed = true; break; }
+        const { data: batchResult, error: batchError } = await supabase.rpc('send_gift_batch', {
+          p_recipients: resolvedTargets.map((target) => target.resolvedId),
+          p_gift_id: String(gift.id),
+          p_diamond_cost: gift.price,
+          p_room_id: streamRecordId || null,
+          p_gift_name: gift.name,
+          p_count: multiplier,
+          p_request_id: createClientRequestUuid(),
+        });
+        authoritativeGiftResult = batchResult;
+        anyFailed = !!batchError || batchResult?.success === false;
+        if (anyFailed) {
+          showCuteAlert('Gift failed', batchError?.message || batchResult?.message || 'Please try again.');
         }
       } finally {
         // Release after a short grace window so the profile realtime
@@ -2892,9 +3777,18 @@ export default function BroadcastRoomScreen() {
       setIsProcessingGift(false);
       if (anyFailed) return;
 
-      // Goal only counts the host's portion (matches what receivers add)
-      setEarnings(prev => prev + hostValue);
-      setTotalGiftsReceived(prev => prev + (multiplier * targetCount));
+      const committedGiftLogIds = Array.isArray(authoritativeGiftResult?.gift_logs)
+        ? authoritativeGiftResult.gift_logs.map((row) => row?.id).filter(Boolean)
+        : [];
+
+      // The RPC returns the committed stream totals. Use those exact values
+      // instead of estimating from client prices/recipient count.
+      if (authoritativeGiftResult?.stream_total_earnings != null && Number.isFinite(Number(authoritativeGiftResult.stream_total_earnings))) {
+        setEarnings(Number(authoritativeGiftResult.stream_total_earnings) || 0);
+      }
+      if (authoritativeGiftResult?.stream_total_gifts != null && Number.isFinite(Number(authoritativeGiftResult.stream_total_gifts))) {
+        setTotalGiftsReceived(Number(authoritativeGiftResult.stream_total_gifts) || 0);
+      }
       // Refresh guardians since the sender may have just entered the top 3.
       // Debounced: a 100x combo only triggers one RPC after the burst.
       scheduleGuardianRefresh();
@@ -2926,21 +3820,7 @@ export default function BroadcastRoomScreen() {
       const recipientNames = targets.map(t => t.name);
       showFloatingToast(gift, newCount, recipientNames);
 
-      const animId = `anim-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
-      setActiveGiftAnimation({ id: animId, source: gift.source, loop: gift.loop || false });
-      // Fire the gift SFX in parallel with the Lottie overlay. Safe to call
-      // even when the gift has no sound configured — the manager returns
-      // silently. Done locally only here; remote viewers play their own
-      // SFX when the broadcast message arrives (see the gift-message
-      // handler in the channel listener).
-      playGiftSound(gift);
-
-      if (lottieTimeoutRef.current) clearTimeout(lottieTimeoutRef.current);
-      if (gift.loop || gift.customDuration || multiplier > 1) {
-        lottieTimeoutRef.current = setTimeout(() => {
-          setActiveGiftAnimation((prev) => prev.id === animId ? { id: null, source: null, loop: false } : prev);
-        }, multiplier > 1 ? 4000 : (gift.customDuration || 3000));
-      }
+      enqueueGiftAnimation(gift, multiplier, 'sent');
 
       if (comboTimeoutRef.current) clearTimeout(comboTimeoutRef.current);
       comboTimeoutRef.current = setTimeout(() => {
@@ -2957,7 +3837,8 @@ export default function BroadcastRoomScreen() {
         target: targetText,
         // Plain-text fallback (kept so older listeners / logs still read sensibly)
         message: `${user?.name || 'User'} sent ${multiplier > 1 ? multiplier + 'x ' : ''}${gift.name} to ${targetText} 🎁`,
-        color: '#F472B6'
+        color: '#F472B6',
+        createdAt: new Date().toISOString(),
       };
 
       if (channelRef.current) {
@@ -2970,9 +3851,16 @@ export default function BroadcastRoomScreen() {
             userAvatar: user?.avatar,
             giftId: gift.id,
             name: gift.name,
-            count: newCount,
+            // Quantity for this committed gift event, never the cumulative
+            // combo count. Receivers animate and total this value once.
+            count: multiplier,
+            comboCount: newCount,
             target: targetText,
-            hostValue, // host-bound diamonds for Live Goal sync
+            hostValue,
+            hostEarningsDelta: Number(authoritativeGiftResult?.host_earnings_delta) || 0,
+            streamTotalGifts: authoritativeGiftResult?.stream_total_gifts,
+            streamTotalEarnings: authoritativeGiftResult?.stream_total_earnings,
+            giftLogIds: committedGiftLogIds,
             // Per-recipient diamonds — receivers use this to bump
             // the per-seat earnings badge in real time without
             // waiting for the next 30s reconcile.
@@ -2987,29 +3875,24 @@ export default function BroadcastRoomScreen() {
           event: 'chat',
           payload: giftMessage
         });
-        // Cross-live notification: if this is a "meaningful" gift
-        // (totalCost ≥ 500 💎), fan out to the global channel so
-        // every other live room's chat shows a tap-to-join row.
-        if (globalEventsChannelRef.current && totalCost >= 500) {
-          try {
-            globalEventsChannelRef.current.send({
-              type: 'broadcast',
-              event: 'gift_in_live',
-              payload: {
-                roomId: id,
-                mode,
-                type,
-                hostId: stream?.broadcasterId,
-                hostName: stream?.broadcasterName,
-                hostAvatar: stream?.coverUrl,
-                senderName: user?.name,
-                giftName: gift.name,
-                count: newCount,
-                totalCost,
-              },
-            });
-          } catch (_) {}
-        }
+      }
+      // Global gift announcements do not depend on the room chat channel.
+      // The shared publisher enforces the exact 1K threshold and FIFO event id.
+      if (totalCost >= LIVE_ANNOUNCEMENT_THRESHOLDS.gift) {
+        publishGlobalLiveAnnouncement('gift_in_live', {
+          eventId: `gift-${giftMessage.id}`,
+          roomId: id,
+          mode,
+          type,
+          hostId: stream?.broadcasterId,
+          hostName: stream?.broadcasterName,
+          hostAvatar: stream?.coverUrl,
+          senderName: user?.name,
+          senderAvatar: user?.avatar,
+          giftName: gift.name,
+          count: newCount,
+          totalCost,
+        }).catch(() => {});
       }
     } else {
       setShowGiftMenu(false);
@@ -3242,10 +4125,11 @@ export default function BroadcastRoomScreen() {
                   <Text style={styles.recipientName}>All</Text>
                 </TouchableOpacity>
 
-                {/* "Host" tile is hidden from the host's own picker so they
-                    can't pick themselves. Viewers + seated guests can still
-                    select the host as a recipient. */}
-                {!isHostView && (
+                {/* Viewers and seated guests can always gift the host. The host
+                    sees this tile for themselves only while Super Admin has
+                    self-gifting enabled; the server enforces the same rule plus
+                    the daily limit, so this is presentation only. */}
+                {(!isHostView || selfGiftingEnabled) && (
                   <TouchableOpacity
                     style={[styles.recipientItem, giftRecipients.includes('host') && !giftRecipients.includes('all') && styles.recipientActive]}
                     onPress={() => setGiftRecipients(prev => prev.includes('all') ? ['host'] : (prev.includes('host') ? prev.filter(i => i !== 'host') : [...prev, 'host']))}
@@ -3293,7 +4177,8 @@ export default function BroadcastRoomScreen() {
               windowSize={3}
               renderItem={({ item }) => (
                 <TouchableOpacity
-                  style={[styles.giftItemCard, combo.giftId === item.id && { backgroundColor: BRAND.primary10 }]}
+                  style={[styles.giftItemCard, combo.giftId === item.id && styles.giftItemCardSelected]}
+                  accessibilityState={{ selected: combo.giftId === item.id }}
                   // Tap = select only. The actual send happens when the
                   // user presses the "Send" button at the bottom. Users
                   // were complaining gifts went out the moment they
@@ -3321,6 +4206,11 @@ export default function BroadcastRoomScreen() {
                       style={{ width: GIFT_LOTTIE, height: GIFT_LOTTIE }}
                     />
                   </View>
+                  {combo.giftId === item.id && (
+                    <View style={styles.giftSelectedBadge}>
+                      <Ionicons name="checkmark" size={13} color="#FFF" />
+                    </View>
+                  )}
                   <Text style={styles.giftName} numberOfLines={1}>{item.name}</Text>
                   <View style={styles.giftPriceRow}>
                     <Ionicons name="diamond" size={10} color="#FBBF24" />
@@ -3618,11 +4508,12 @@ export default function BroadcastRoomScreen() {
                         if (firstEmpty !== -1) {
                           const newSeats = [...activeGuests];
                           newSeats[firstEmpty] = item;
-                          setActiveGuests(newSeats);
+                          commitActiveGuests(newSeats);
                           setPendingRequests(prev => prev.filter(r => r.id !== item.id));
 
                           // Broadcast acceptance
                           if (channelRef.current) {
+                            const seatRevision = nextSeatRevision();
                             channelRef.current.send({
                               type: 'broadcast',
                               event: 'call_accepted',
@@ -3631,8 +4522,30 @@ export default function BroadcastRoomScreen() {
                                 seatIdx: firstEmpty,
                                 activeGuests: newSeats,
                                 audioSlotCount,
+                                seatRevision,
                               }
                             });
+                            channelRef.current.send({
+                              type: 'broadcast',
+                              event: 'seat_update',
+                              payload: {
+                                activeGuests: newSeats,
+                                audioSlotCount,
+                                seatRevision,
+                                reason: 'accepted',
+                                acceptedGuestId: item.id,
+                              },
+                            });
+                            const joinedMessage = {
+                              id: `guest-joined-${item.id}-${Date.now()}`,
+                              userId: item.id,
+                              user: 'System',
+                              type: 'entrance',
+                              message: `${item.name || 'A guest'} joined the live`,
+                              color: '#38BDF8',
+                              createdAt: new Date().toISOString(),
+                            };
+                            channelRef.current.send({ type: 'broadcast', event: 'chat', payload: joinedMessage });
                           }
                         } else {
                           showCuteAlert("All Seats Filled", "Please remove someone before adding a new guest.");
@@ -3985,15 +4898,14 @@ export default function BroadcastRoomScreen() {
       <GamesBottomSheet
         gameMenuState={gameMenuState}
         setGameMenuState={setGameMenuState}
-        insetsTop={insets.top}
         insetsBottom={insets.bottom}
-        roomId={id}
-        myDiamonds={myDiamonds}
-        setMyDiamonds={setMyDiamonds}
-        fruitActive={fruitActive}
-        teenPattiActive={teenPattiActive}
         greedyLionActive={greedyLionActive}
+        greedyProActive={greedyProActive}
         tinPattiProActive={tinPattiProActive}
+        luckyDiceActive={luckyDiceActive}
+        crashActive={crashActive}
+        onGameWin={announceGameWin}
+        notificationBanner={renderGlobalLiveAnnouncement()}
       />
     );
   };
@@ -4047,7 +4959,7 @@ export default function BroadcastRoomScreen() {
         <View style={[styles.audioTopShell, { top: insets.top + 8 }]}>
           <View style={styles.audioTopNav}>
             <TouchableOpacity style={styles.audioAssetButton} onPress={leaveAudioRoom}>
-              <Image source={AUDIO_BACK_BUTTON} style={styles.audioAssetIcon} resizeMode="contain" />
+              <Image source={AUDIO_CLOSE_BUTTON} style={styles.audioAssetIcon} resizeMode="contain" />
             </TouchableOpacity>
             <View style={styles.audioTopNavRight}>
               {isHostView && audioVisitors.length > 0 && (
@@ -4075,9 +4987,9 @@ export default function BroadcastRoomScreen() {
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.audioAssetButton}
-                onPress={() => isHostView ? setShowHostMoreMenu(true) : handleViewersClick()}
+                onPress={handleViewersClick}
               >
-                <Image source={AUDIO_MORE_BUTTON} style={styles.audioAssetIcon} resizeMode="contain" />
+                <Ionicons name="eye-outline" size={25} color="#FFF" />
               </TouchableOpacity>
             </View>
           </View>
@@ -4150,12 +5062,14 @@ export default function BroadcastRoomScreen() {
     );
     const avatarClusterW = shownAvatars > 0 ? 36 + (shownAvatars - 1) * 24 : 0;
     const rightSideW = avatarClusterW + 80; // trophy 32 + close 32 + gaps ~16
-    const leftFixed = 110; // avatar 40 + hostInfo margins 20 + follow 28 + padding/border ~22
-    const marqueeWidth = Math.max(80, Math.min(width - 32 - leftFixed - rightSideW - 8, 200));
+    const availableLeftWidth = Math.max(148, width - 32 - rightSideW - 8);
+    const hostPanelWidth = Math.min(availableLeftWidth, Math.max(158, width * 0.43));
+    const hostPanelFixedWidth = 40 + 8 + 12 + (!isHostView && !isFollowing ? 32 : 0);
+    const marqueeWidth = Math.max(52, hostPanelWidth - hostPanelFixedWidth);
 
     return (
     <View style={[styles.topActions, { top: insets.top + 10 }]}>
-      <View style={styles.topLeftContainer}>
+      <View style={[styles.topLeftContainer, { width: hostPanelWidth }]}>
         <View style={styles.broadcasterPanelWrapper}>
           <TouchableOpacity
             style={styles.broadcasterPanel}
@@ -4503,7 +5417,7 @@ export default function BroadcastRoomScreen() {
                   <MarqueeText
                     text={guest.name}
                     style={styles.guestNameMini}
-                    containerWidth={104}
+                    containerWidth={80}
                   />
                 </View>
 
@@ -4923,16 +5837,12 @@ export default function BroadcastRoomScreen() {
                           selectedMallIntroVideoUrl: user?.selectedMallIntroVideoUrl || null,
                           selectedMallIntroThumbnailUrl: user?.selectedMallIntroThumbnailUrl || null,
                         };
-                        const newSeats = activeGuests.map(g => (g && g.id === user?.id) ? null : g);
-                        newSeats[seatIdx] = myUser;
-                        setActiveGuests(newSeats);
-                        setCallRequestStatus('accepted');
-
+                        setCallRequestStatus('pending');
                         if (channelRef.current) {
                           channelRef.current.send({
                             type: 'broadcast',
-                            event: 'seat_update',
-                            payload: { activeGuests: newSeats, audioSlotCount }
+                            event: 'seat_claim',
+                            payload: { guest: myUser, seatIdx }
                           });
                         }
                       }
@@ -5039,7 +5949,7 @@ export default function BroadcastRoomScreen() {
     // any active "off-default" state so the host knows at a glance
     // whether the cam is off or beauty is on without opening the
     // sheet.
-    const beautyOn = (beautyLevels.smooth + beautyLevels.whiten + beautyLevels.redness + beautyLevels.sharp) > 0;
+    const beautyOn = anyBeautyOn;
     const indicatorColor = !isCamOn ? '#EF4444' : (beautyOn ? '#FBBF24' : null);
     return (
       <View style={styles.videoSideBar}>
@@ -5063,8 +5973,17 @@ export default function BroadcastRoomScreen() {
   //    there's a single source of truth for behaviour.
   const renderHostMoreMenu = () => {
     if (!isHostView) return null;
-    const beautyOn = (beautyLevels.smooth + beautyLevels.whiten + beautyLevels.redness + beautyLevels.sharp) > 0;
+    const beautyOn = anyBeautyOn;
     const items = [
+      {
+        key:    'share',
+        label:  'Share Live',
+        icon:   'share-social-outline',
+        color:  '#38BDF8',
+        onPress: () => { setShowHostMoreMenu(false); handleShareRoom(); },
+        active: false,
+        show:   true,
+      },
       {
         key:    'music',
         label:  'Music',
@@ -5125,7 +6044,7 @@ export default function BroadcastRoomScreen() {
         label:  isSeatsLocked ? 'Locked' : 'Unlock',
         icon:   isSeatsLocked ? 'lock-closed' : 'lock-open-outline',
         color:  isSeatsLocked ? BRAND.primary : '#FFF',
-        onPress: () => setIsSeatsLocked(!isSeatsLocked), // no auto-close; toggle in place
+        onPress: () => setIsSeatsLocked((locked) => !locked), // no auto-close; toggle in place
         active: isSeatsLocked,
         show:   isAudio,
       },
@@ -5238,7 +6157,7 @@ export default function BroadcastRoomScreen() {
     // the old sidebar had so behaviour is unchanged — only the
     // surface has moved. Each tile shows an "active" tint when its
     // feature is in a non-default state (cam off, beauty on).
-    const beautyOn = (beautyLevels.smooth + beautyLevels.whiten + beautyLevels.redness + beautyLevels.sharp) > 0;
+    const beautyOn = anyBeautyOn;
     const tools = [
       {
         key:     'flip',
@@ -5502,38 +6421,43 @@ export default function BroadcastRoomScreen() {
           if (item.type === 'live_notification') {
             const p = item.payload || {};
             const isGift = item.subType === 'gift';
-            const tint = isGift ? 'rgba(251,191,36,0.18)' : 'rgba(244,63,94,0.18)';
-            const border = isGift ? '#FBBF24' : '#F43F5E';
-            const accent = isGift ? '#FBBF24' : '#F87171';
-            const icon = isGift ? '🎁' : '💰';
+            const isGameWin = item.subType === 'game_win';
+            const icon = isGift ? '🎁' : isGameWin ? '🏆' : '💰';
+            const notificationFrame = announcementFrameFor(item.id);
+            const notificationAvatar = isGameWin && p.isBot
+              ? botProfileFor(p.winnerId || p.winnerName)
+              : p.winnerAvatar ? { uri: p.winnerAvatar }
+                : isGift && p.senderAvatar ? { uri: p.senderAvatar } : null;
             const body = isGift
               ? `${p.senderName || 'Someone'} sent ${p.count > 1 ? p.count + 'x ' : ''}${p.giftName || 'a gift'} to ${p.hostName || 'a host'}`
-              : `${p.dropperName || 'Someone'} dropped ${(Number(p.perWinner) * Number(p.winnerCount || 0)).toLocaleString()} 💎 Lucky Bag — ${p.winnerCount || 0} winners`;
+              : isGameWin
+                ? `${p.winnerName || 'Someone'} won ${Number(p.amount || 0).toLocaleString()} 💎 in ${p.gameName || 'a game'}`
+                : `${p.dropperName || 'Someone'} dropped ${(Number(p.perWinner) * Number(p.winnerCount || 0)).toLocaleString()} 💎 Lucky Bag — ${p.winnerCount || 0} winners`;
             return (
-              <TouchableOpacity
-                activeOpacity={0.85}
-                onPress={() => {
-                  if (!p.roomId) return;
-                  const m = p.mode || 'audio';
-                  const t = p.type || '';
-                  router.replace(`/broadcast/${p.roomId}?mode=${m}${t ? `&type=${t}` : ''}`);
-                }}
-                style={[styles.liveNotifBlock, { backgroundColor: tint, borderColor: border }]}
-              >
-                <Text style={styles.liveNotifIcon}>{icon}</Text>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.liveNotifBody} numberOfLines={2}>{body}</Text>
-                  <Text style={[styles.liveNotifCta, { color: accent }]}>▶ Tap to join {p.hostName || ''}</Text>
+              <View style={styles.liveNotifBlock}>
+                <Image source={notificationFrame} style={styles.liveNotifFrame} resizeMode="stretch" pointerEvents="none" />
+                <View style={styles.liveNotifContent} pointerEvents="none">
+                  {notificationAvatar
+                    ? <Image source={notificationAvatar} style={styles.liveNotifAvatar} />
+                    : <View style={styles.liveNotifIconWrap}><Text style={styles.liveNotifIcon}>{icon}</Text></View>}
+                  <View style={styles.liveNotifCopy}>
+                    <Text style={styles.liveNotifBody} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.7}>{body}</Text>
+                  </View>
                 </View>
-              </TouchableOpacity>
+              </View>
             );
           }
           const isGuardian = item.userId && guardianIds.includes(item.userId);
-          const VIP_NAME_COLOR = { VIP: '#CBD5E1', SVIP: '#FCD34D', VVIP: '#F472B6' };
-          const VIP_BORDER     = { VIP: 'rgba(203,213,225,0.5)', SVIP: 'rgba(252,211,77,0.5)', VVIP: 'rgba(244,114,182,0.6)' };
-          const VIP_BADGE      = { VIP: 'VIP', SVIP: 'SVIP', VVIP: 'VVIP' };
-          const tierColor      = item.vipType ? VIP_NAME_COLOR[item.vipType] : null;
-          const tierBorder     = item.vipType ? VIP_BORDER[item.vipType]     : null;
+          const rawTier = String(item.vipType || '').toUpperCase();
+          const tier = ['VIP', 'VVIP', 'SVIP'].includes(rawTier) ? rawTier : null;
+          const level = Math.max(1, Number(item.level) || 1);
+          const firstName = String(item.firstName || item.user || 'User').trim().split(/\s+/)[0];
+          const avatarUrl = item.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${item.userId || firstName}`;
+          const tierBorder = {
+            VIP: 'rgba(203,213,225,0.5)',
+            VVIP: 'rgba(74,222,128,0.55)',
+            SVIP: 'rgba(248,113,113,0.6)',
+          }[tier];
           return (
             <View style={styles.chatMessageRow}>
               <View style={[
@@ -5542,19 +6466,47 @@ export default function BroadcastRoomScreen() {
                 !item.isHost && tierBorder && { borderColor: tierBorder, borderWidth: 1 },
                 !item.isHost && !tierBorder && isGuardian && { borderColor: 'rgba(168,85,247,0.5)', borderWidth: 1 },
               ]}>
-                <Text style={styles.chatUserText}>
-                  {item.isHost && (
-                    <Text style={{ color: '#FBBF24', fontSize: 10, fontWeight: 'bold' }}> [Host] </Text>
-                  )}
-                  {!item.isHost && item.vipType && (
-                    <Text style={{ color: tierColor, fontSize: 9, fontWeight: 'bold' }}>{VIP_BADGE[item.vipType]} </Text>
-                  )}
-                  {isGuardian && !item.isHost && (
-                    <Text style={{ color: '#A855F7', fontSize: 11, fontWeight: 'bold' }}>♛ </Text>
-                  )}
-                  <Text style={{ color: tierColor || item.color, fontWeight: 'bold' }}>{item.user}: </Text>
-                  {item.message}
-                </Text>
+                <View style={styles.chatPrimaryIdentityRow}>
+                  <Image source={{ uri: avatarUrl }} style={styles.chatCommentAvatar} />
+                  <View style={styles.chatIdentityStack}>
+                    {/* First line stays with the avatar: full profile name, level and the permanent admin tag. */}
+                    <View style={styles.chatIdentityFirstLine}>
+                      <Text style={[styles.chatFullName, { color: item.color || '#FFF' }]} numberOfLines={1}>
+                        {item.user || 'User'}
+                      </Text>
+                      <View style={[styles.chatIdentityPlate, styles.chatLevelPlate]}>
+                        <Image source={CHAT_LEVEL_FRAMES[tier || 'normal']} style={styles.chatIdentityFrame} resizeMode="stretch" />
+                        <Text style={styles.chatLevelLabel}>Lv.{level}</Text>
+                      </View>
+                      {!!item.commentTagUrl && (
+                        <Image
+                          source={{ uri: item.commentTagUrl }}
+                          style={styles.chatAdminTag}
+                          resizeMode="contain"
+                          accessibilityLabel={item.commentTagName || 'User tag'}
+                        />
+                      )}
+                    </View>
+                    {/* Second line is reserved for membership and nickname so the two identity rows exactly match avatar height. */}
+                    <View style={styles.chatIdentitySecondLine}>
+                      {tier ? (
+                        <View style={[styles.chatIdentityPlate, styles.chatMembershipPlate]}>
+                          <Image source={CHAT_MEMBERSHIP_FRAMES[tier]} style={styles.chatIdentityFrame} resizeMode="stretch" />
+                          <Text style={styles.chatMembershipLabel}>{tier}</Text>
+                        </View>
+                      ) : null}
+                      {(tier || item.nickname) ? (
+                        <View style={[styles.chatIdentityPlate, styles.chatNamePlate]}>
+                          <Image source={tier ? CHAT_NAME_FRAMES[tier] : CHAT_LEVEL_FRAMES.normal} style={styles.chatIdentityFrame} resizeMode="stretch" />
+                          <Text style={styles.chatNameLabel} numberOfLines={1}>{item.nickname || firstName}</Text>
+                        </View>
+                      ) : null}
+                      {item.isHost && <Text style={styles.chatHostMarker}>HOST</Text>}
+                      {isGuardian && !item.isHost && <Text style={styles.chatGuardianMarker}>♛</Text>}
+                    </View>
+                  </View>
+                </View>
+                <Text style={styles.chatCommentText}>{item.message}</Text>
               </View>
             </View>
           );
@@ -5664,6 +6616,56 @@ export default function BroadcastRoomScreen() {
   }, [id]);
 
   // === Lucky Bag ===
+  // Rehydrate and subscribe only to bags belonging to this exact live row.
+  // The global table drives discovery banners, never cross-room claiming.
+  useEffect(() => {
+    if (!id || !streamRecordId) return undefined;
+    let cancelled = false;
+    const activateAnnouncement = async (announcement) => {
+      if (cancelled || !announcement?.bag_id
+          || String(announcement.stream_id || '') !== String(streamRecordId)) return;
+      const [{ data: bag }, { data: dropper }] = await Promise.all([
+        supabase.from('lucky_bags').select('id,per_winner,winner_count,status').eq('id', announcement.bag_id).maybeSingle(),
+        supabase.from('profiles').select('full_name').eq('id', announcement.dropper_id).maybeSingle(),
+      ]);
+      if (!bag || bag.status !== 'open') return;
+      if (cancelled) return;
+      setActiveLuckyBag({
+        id: bag.id,
+        perWinner: Number(bag.per_winner || 0),
+        winners: Number(bag.winner_count || 0),
+        droppedBy: announcement.dropper_id,
+        dropperName: dropper?.full_name || 'Someone',
+        dropAt: announcement.created_at,
+        expiresAt: announcement.expires_at,
+        roomId: announcement.room_host_id,
+        streamId: announcement.stream_id,
+        posX: 0.55,
+        posY: 0.64,
+      });
+      scheduleLuckyBagExpiry(bag.id, announcement.expires_at);
+    };
+    supabase
+      .from('lucky_bag_global_announcements')
+      .select('bag_id,stream_id,room_host_id,dropper_id,created_at,expires_at,prize_diamonds')
+      .eq('stream_id', streamRecordId)
+      .gt('expires_at', new Date().toISOString())
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+      .then(({ data }) => activateAnnouncement(data));
+    const channel = supabase
+      .channel(`room-global-lucky-bags-${id}-${Date.now()}`)
+      .on('postgres_changes', {
+        event: 'INSERT', schema: 'public', table: 'lucky_bag_global_announcements',
+      }, ({ new: row }) => activateAnnouncement(row))
+      .subscribe();
+    return () => {
+      cancelled = true;
+      try { supabase.removeChannel(channel); } catch (_) {}
+    };
+  }, [id, streamRecordId, scheduleLuckyBagExpiry]);
+
   // Anyone in the room (host, co-host on call, or viewer) can throw a
   // bag — the SQL deducts from the caller and the dropper is recorded
   // as host_id so they cannot claim their own bag. The room owner (id)
@@ -5679,7 +6681,7 @@ export default function BroadcastRoomScreen() {
     if (error) { showCuteAlert('Drop failed', error.message); return; }
     setShowLuckyBagDrop(false);
     const perWinner = Math.floor(luckyBagPrize / luckyBagWinners);
-    const dropperName = (user?.user_metadata?.full_name) || user?.email?.split('@')[0] || 'Someone';
+    const dropperName = user?.name || user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Someone';
     // Random landing spot. Range tuned to avoid the top header (avatar
     // + viewers count), the bottom chat input bar, and the audio seat
     // grid in the centre. posX 0.18–0.78 keeps the bag clear of the
@@ -5701,6 +6703,8 @@ export default function BroadcastRoomScreen() {
           droppedBy: user?.id,
           dropperName,
           dropAt,
+          roomId: id,
+          streamId: streamRecordId,
           posX,
           posY,
         },
@@ -5708,25 +6712,44 @@ export default function BroadcastRoomScreen() {
     }
     // Cross-live notification — fan out to every other room's chat
     // so viewers can hop in and grab a piece of the bag.
-    if (globalEventsChannelRef.current) {
-      try {
-        globalEventsChannelRef.current.send({
-          type: 'broadcast',
-          event: 'lucky_bag_in_live',
-          payload: {
-            roomId: id,
-            mode,
-            type,
-            hostId: stream?.broadcasterId,
-            hostName: stream?.broadcasterName,
-            hostAvatar: stream?.coverUrl,
-            dropperName,
-            perWinner,
-            winnerCount: luckyBagWinners,
-          },
-        });
-      } catch (_) {}
-    }
+    publishGlobalLiveAnnouncement('lucky_bag_in_live', {
+      eventId: `lucky-bag-${data}`,
+      bagId: data,
+      roomId: id,
+      streamId: streamRecordId,
+      mode: 'viewer',
+      type,
+      hostId: stream?.broadcasterId,
+      hostName: stream?.broadcasterName,
+      hostAvatar: stream?.coverUrl,
+      dropperName,
+      dropperId: user?.id,
+      prizeDiamonds: luckyBagPrize,
+      perWinner,
+      winnerCount: luckyBagWinners,
+      dropAt,
+      posX,
+      posY,
+    }).catch(() => {});
+    publishGlobalLiveAnnouncement('lucky_bag_drop_global', {
+      eventId: `lucky-bag-drop-${data}`,
+      bagId: data,
+      roomId: id,
+      streamId: streamRecordId,
+      mode: 'viewer',
+      type,
+      hostId: stream?.broadcasterId,
+      hostName: stream?.broadcasterName,
+      hostAvatar: stream?.coverUrl,
+      dropperId: user?.id,
+      dropperName,
+      prizeDiamonds: luckyBagPrize,
+      perWinner,
+      winnerCount: luckyBagWinners,
+      dropAt,
+      posX,
+      posY,
+    }).catch(() => {});
     // Dropper also sees the countdown + bag — the SQL blocks them from
     // claiming, and renderActiveLuckyBag's tap handler disables for the
     // dropper, so they can't accidentally claim from their own bag.
@@ -5737,10 +6760,12 @@ export default function BroadcastRoomScreen() {
       droppedBy: user?.id,
       dropperName,
       dropAt,
+      roomId: id,
+      streamId: streamRecordId,
       posX,
       posY,
     });
-    setTimeout(() => setActiveLuckyBag(null), 75000); // 15s reveal + 60s claim
+    scheduleLuckyBagExpiry(data, 75000); // 15s reveal + 60s claim
   };
 
   // Phase / countdown driver. Re-runs whenever a new bag lands. Reads
@@ -5826,16 +6851,37 @@ export default function BroadcastRoomScreen() {
     // stale tap on the countdown banner could still trip this. Bail
     // until the open phase to be safe.
     if (luckyBagPhase !== 'open') return;
+    if (!streamRecordId || String(activeLuckyBag.streamId || streamRecordId) !== String(streamRecordId)) return;
     setLuckyBagClaiming(true);
-    const { data, error } = await supabase.rpc('claim_lucky_bag', { bag: activeLuckyBag.id });
+    const { data, error } = await supabase.rpc('claim_lucky_bag_v2', {
+      p_bag_id: activeLuckyBag.id,
+      p_stream_id: streamRecordId,
+    });
     setLuckyBagClaiming(false);
-    if (error) { showCuteAlert('Claim failed', error.message); return; }
+    if (error) {
+      showCuteAlert('Could not open bag', 'Please check your connection and try again.');
+      return;
+    }
+
+    const claimStatus = String(data?.status || 'UNKNOWN');
+    if (claimStatus === 'WRONG_LIVE' || claimStatus === 'NOT_FOUND') {
+      setActiveLuckyBag(null);
+      showCuteAlert('Bag unavailable', 'This Lucky Bag belongs to another live or is no longer available.');
+      return;
+    }
+    if (claimStatus === 'OWNER') {
+      setLuckyBagMyResult({ kind: 'owner' });
+    }
+    if (Number.isFinite(Number(data?.balance))) {
+      setMyDiamonds(Number(data.balance));
+    }
+    Promise.resolve(refreshUser?.()).catch(() => {});
 
     // After the claim attempt — whether it landed a prize or not —
     // show the winners list so the user sees where they ranked
     // (or that they missed). This is the Streamkar-style "tap → see
     // who won" UX.
-    const wonAmount = Number(data) || 0;
+    const wonAmount = claimStatus === 'CLAIMED' ? Number(data?.amount) || 0 : 0;
     const winners = await fetchLuckyBagWinners(activeLuckyBag.id);
     setLuckyBagWinnersList(winners);
 
@@ -5848,7 +6894,7 @@ export default function BroadcastRoomScreen() {
         amount: Number(myRow.amount) || wonAmount,
         rank:   Number(myRow.rank),
       });
-    } else if (activeLuckyBag.droppedBy === user?.id) {
+    } else if (claimStatus === 'OWNER' || activeLuckyBag.droppedBy === user?.id) {
       // The dropper can never appear in the winners list (SQL blocks
       // self-claim), so show a distinct "your bag" header instead of
       // the regretful sorry one.
@@ -5874,84 +6920,177 @@ export default function BroadcastRoomScreen() {
     ];
     const PRESETS = [
       { name: 'Off',     preset: { smooth: 0, whiten: 0, redness: 0, sharp: 0 } },
-      { name: 'Natural', preset: { smooth: 1, whiten: 1, redness: 1, sharp: 0 } },
-      { name: 'Glow',    preset: { smooth: 2, whiten: 2, redness: 2, sharp: 1 } },
-      { name: 'Strong',  preset: { smooth: 4, whiten: 3, redness: 3, sharp: 2 } },
+      { name: 'Natural', preset: { smooth: 1, whiten: 1, redness: 1, sharp: 1 } },
+      { name: 'Glow',    preset: { smooth: 1, whiten: 2, redness: 2, sharp: 2 } },
+      { name: 'Strong',  preset: { smooth: 2, whiten: 3, redness: 3, sharp: 3 } },
     ];
     const isActive = (p) => Object.keys(p).every(k => p[k] === beautyLevels[k]);
+    const SHAPE_STYLES = [
+      { v: 0, name: 'Off',     icon: 'close-circle-outline' },
+      { v: 1, name: 'Female',  icon: 'female-outline' },
+      { v: 2, name: 'Male',    icon: 'male-outline' },
+      { v: 3, name: 'Natural', icon: 'happy-outline' },
+    ];
+    const BLUR_LEVELS = [
+      { v: 0, name: 'Off',    icon: 'close-circle-outline' },
+      { v: 1, name: 'Light',  icon: 'ellipse-outline' },
+      { v: 2, name: 'Medium', icon: 'contrast-outline' },
+      { v: 3, name: 'Strong', icon: 'cloud-outline' },
+    ];
+    const ENHANCERS = [
+      { key: 'lowlight', name: 'Low light', icon: 'moon-outline' },
+      { key: 'denoise',  name: 'Denoise',   icon: 'sparkles-outline' },
+      { key: 'vivid',    name: 'Vivid',     icon: 'color-palette-outline' },
+    ];
+    const SheetLabel = ({ text, hint }) => (
+      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6, marginTop: 4 }}>
+        <Text style={{ color: '#FFF', fontSize: 13, fontWeight: '600' }}>{text}</Text>
+        {hint ? <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 10, marginLeft: 8 }}>{hint}</Text> : null}
+      </View>
+    );
     return (
       <Modal visible={showBeautySheet} transparent animationType="slide" onRequestClose={() => setShowBeautySheet(false)}>
-        <TouchableOpacity style={styles.moreOverlay} activeOpacity={1} onPress={() => setShowBeautySheet(false)}>
-          <View style={[styles.moreSheet, { paddingBottom: insets.bottom + 16 }]}>
-            <View style={styles.modalHandle} />
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 6 }}>
-              <Ionicons name="sparkles" size={20} color="#FBBF24" />
-              <Text style={[styles.moreTitle, { marginLeft: 8 }]}>Beauty</Text>
-            </View>
-            <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 11, textAlign: 'center', marginBottom: 14 }}>
-              Powered by your Agora SDK — no extra cost.
-            </Text>
-
-            {/* Preset row */}
-            <View style={{ flexDirection: 'row', gap: 8, marginBottom: 16 }}>
-              {PRESETS.map(p => {
-                const active = isActive(p.preset);
-                return (
-                  <TouchableOpacity
-                    key={p.name}
-                    style={{
-                      flex: 1, paddingVertical: 9, borderRadius: 18, alignItems: 'center', borderWidth: 1,
-                      backgroundColor: active ? `${BRAND.primary}2E` : 'transparent',
-                      borderColor: active ? BRAND.primary : 'rgba(255,255,255,0.18)',
-                    }}
-                    onPress={() => setBeautyLevels(p.preset)}
-                  >
-                    <Text style={{ color: active ? BRAND.primary : '#FFF', fontWeight: '700', fontSize: 12 }}>{p.name}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-
-            {/* Effect rows — bar-style picker (0..4) */}
-            {EFFECTS.map(eff => (
-              <View key={eff.key} style={{ marginBottom: 14 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: eff.color, marginRight: 8 }} />
-                    <Text style={{ color: '#FFF', fontSize: 13, fontWeight: '600' }}>{eff.label}</Text>
-                    <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 10, marginLeft: 8 }}>{eff.desc}</Text>
-                  </View>
-                  <Text style={{ color: eff.color, fontSize: 11, fontWeight: '700' }}>{beautyLevels[eff.key]} / 4</Text>
-                </View>
-                <View style={{ flexDirection: 'row', gap: 6 }}>
-                  {[0, 1, 2, 3, 4].map(lvl => {
-                    const filled = beautyLevels[eff.key] >= lvl && lvl > 0;
-                    const isZero = lvl === 0;
-                    return (
-                      <TouchableOpacity
-                        key={lvl}
-                        activeOpacity={0.7}
-                        style={{
-                          flex: 1, height: 14, borderRadius: 7,
-                          backgroundColor: filled ? eff.color : (isZero && beautyLevels[eff.key] === 0 ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.08)'),
-                          borderWidth: isZero ? 1 : 0,
-                          borderColor: 'rgba(255,255,255,0.2)',
-                        }}
-                        onPress={() => setBeautyLevels(prev => ({ ...prev, [eff.key]: lvl }))}
-                      />
-                    );
-                  })}
-                </View>
+        {/* Tapping the dimmed area still closes; the sheet itself must not, or a
+            slider drag that ends outside the track would dismiss the panel. */}
+        <View style={styles.moreOverlay}>
+          <TouchableOpacity
+            style={styles.beautyBackdrop}
+            activeOpacity={1}
+            onPress={() => setShowBeautySheet(false)}
+          />
+          <View style={[styles.beautySheet, { paddingBottom: insets.bottom + 12 }]}>
+            <View style={styles.beautyHeader}>
+              <View style={styles.beautyHeaderTitle}>
+                <Ionicons name="sparkles" size={18} color="#FBBF24" />
+                <Text style={styles.beautyTitleText}>Beauty</Text>
               </View>
-            ))}
+              <TouchableOpacity
+                style={styles.beautyCloseBtn}
+                onPress={() => setShowBeautySheet(false)}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                accessibilityRole="button"
+                accessibilityLabel="Close beauty settings"
+              >
+                <Ionicons name="close" size={20} color="#FFF" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView
+              style={styles.beautyScroll}
+              contentContainerStyle={styles.beautyScrollContent}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+            >
+              <Text style={styles.beautySubtitle}>
+                Powered by your Agora SDK — no extra cost.
+              </Text>
+
+              {/* Preset row */}
+              <View style={{ flexDirection: 'row', gap: 8, marginBottom: 18 }}>
+                {PRESETS.map(p => {
+                  const active = isActive(p.preset);
+                  return (
+                    <TouchableOpacity
+                      key={p.name}
+                      style={{
+                        flex: 1, paddingVertical: 9, borderRadius: 18, alignItems: 'center', borderWidth: 1,
+                        backgroundColor: active ? `${BRAND.primary}2E` : 'transparent',
+                        borderColor: active ? BRAND.primary : 'rgba(255,255,255,0.18)',
+                      }}
+                      onPress={() => setBeautyLevels(p.preset)}
+                    >
+                      <Text style={{ color: active ? BRAND.primary : '#FFF', fontWeight: '700', fontSize: 12 }}>{p.name}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              {/* Effect rows — drag to set strength (0..4) */}
+              {EFFECTS.map(eff => (
+                <View key={eff.key} style={{ marginBottom: 6 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', flexShrink: 1 }}>
+                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: eff.color, marginRight: 8 }} />
+                      <Text style={{ color: '#FFF', fontSize: 13, fontWeight: '600' }}>{eff.label}</Text>
+                      <Text numberOfLines={1} style={{ color: 'rgba(255,255,255,0.4)', fontSize: 10, marginLeft: 8, flexShrink: 1 }}>{eff.desc}</Text>
+                    </View>
+                    <Text style={{ color: eff.color, fontSize: 11, fontWeight: '700' }}>{beautyLevels[eff.key]} / 4</Text>
+                  </View>
+                  <BeautySlider
+                    value={beautyLevels[eff.key]}
+                    max={4}
+                    color={eff.color}
+                    onChange={(v) => setBeautyLevels(prev => ({ ...prev, [eff.key]: v }))}
+                  />
+                </View>
+              ))}
+
+              <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.10)', marginVertical: 10 }} />
+
+              <SheetLabel text="Face shape" hint="Contour and slim" />
+              <View style={styles.filterTileRow}>
+                {SHAPE_STYLES.map((o) => (
+                  <FilterTile
+                    key={o.v}
+                    icon={o.icon}
+                    label={o.name}
+                    active={faceShape.style === o.v}
+                    color="#F472B6"
+                    onPress={() => setFaceShape((prev) => ({ ...prev, style: o.v }))}
+                  />
+                ))}
+              </View>
+              {faceShape.style > 0 && (
+                <View style={{ marginBottom: 6 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 11 }}>Strength</Text>
+                    <Text style={{ color: '#F472B6', fontSize: 11, fontWeight: '700' }}>{faceShape.intensity} / 4</Text>
+                  </View>
+                  <BeautySlider
+                    value={faceShape.intensity}
+                    max={4}
+                    color="#F472B6"
+                    onChange={(v) => setFaceShape((prev) => ({ ...prev, intensity: v }))}
+                  />
+                </View>
+              )}
+
+              <SheetLabel text="Background blur" hint="Hides your room" />
+              <View style={styles.filterTileRow}>
+                {BLUR_LEVELS.map((o) => (
+                  <FilterTile
+                    key={o.v}
+                    icon={o.icon}
+                    label={o.name}
+                    active={bgBlur === o.v}
+                    color="#38BDF8"
+                    onPress={() => setBgBlur(o.v)}
+                  />
+                ))}
+              </View>
+
+              <SheetLabel text="Camera quality" hint="Best in dim rooms" />
+              <View style={styles.filterTileRow}>
+                {ENHANCERS.map((o) => (
+                  <FilterTile
+                    key={o.key}
+                    icon={o.icon}
+                    label={o.name}
+                    active={!!camEnhance[o.key]}
+                    color="#34D399"
+                    onPress={() => setCamEnhance((prev) => ({ ...prev, [o.key]: !prev[o.key] }))}
+                  />
+                ))}
+              </View>
+            </ScrollView>
           </View>
-        </TouchableOpacity>
+        </View>
       </Modal>
     );
   };
 
   const renderLuckyBagDropModal = () => {
-    const PRIZE_OPTIONS  = [100, 500, 1000, 5000, 10000];
+    const PRIZE_OPTIONS  = [5000, 10000, 50000, 100000];
     const WINNER_OPTIONS = [1, 5, 10, 20];
     return (
       <Modal visible={showLuckyBagDrop} transparent animationType="slide" onRequestClose={() => setShowLuckyBagDrop(false)}>
@@ -6680,14 +7819,7 @@ export default function BroadcastRoomScreen() {
 
       {/* Layer 1: Core Interface & Specialized Backgrounds (Duo/Audio) */}
       <View style={styles.container} {...(!isHostView ? panResponder.panHandlers : {})}>
-        {audioGameCovered ? (
-          <View style={[StyleSheet.absoluteFillObject, { backgroundColor: BRAND.splashBg }]}>
-            <LinearGradient
-              colors={['rgba(126,52,174,.34)', 'rgba(4,0,35,.78)']}
-              style={StyleSheet.absoluteFillObject}
-            />
-          </View>
-        ) : isAudio ? (
+        {isAudio ? (
           <View style={StyleSheet.absoluteFillObject}>
             <Image source={AUDIO_ROOM_BACKGROUND} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
             <LinearGradient
@@ -6716,14 +7848,7 @@ export default function BroadcastRoomScreen() {
           renderVideoLayout()
         )}
 
-        {/* Layered Foreground. react-native-keyboard-controller reports the
-            true keyboard inset on edge-to-edge Android, so we raise the
-            foreground's bottom edge by keyboardHeight when the keyboard is up.
-            The flex:1 chat then shrinks naturally, and the input lands just
-            above the keyboard on any device size. */}
-        <View style={[styles.overlayForeground, isKeyboardVisible && { bottom: keyboardHeight }]}>
-          {!audioGameCovered && (
-            <>
+        <View style={styles.overlayForeground}>
           {currentMusic && (
             <TouchableOpacity
               style={styles.musicMarquee}
@@ -6739,21 +7864,6 @@ export default function BroadcastRoomScreen() {
           )}
           {renderEntranceBanner()}
           {renderTopActions()}
-          {/* Tiny swipe hint pill — only when viewer entered from home with a
-              non-trivial feed. Disappears on the first swipe. */}
-          {!isHostView && siblingIds.length > 1 && (
-            <View pointerEvents="none" style={[styles.swipeHint, { top: insets.top + 6 }]}>
-              {currentIdx > 0 && (
-                <Ionicons name="chevron-up" size={11} color="rgba(255,255,255,0.7)" />
-              )}
-              <Text style={styles.swipeHintText}>
-                {Math.max(1, currentIdx + 1)} / {siblingIds.length}
-              </Text>
-              {currentIdx < siblingIds.length - 1 && (
-                <Ionicons name="chevron-down" size={11} color="rgba(255,255,255,0.7)" />
-              )}
-            </View>
-          )}
           {renderRoomTitle()}
           {renderVideoSideBar()}
           {!isAudio && renderLiveGoal()}
@@ -6766,13 +7876,15 @@ export default function BroadcastRoomScreen() {
               {/* Title now part of host panel */}
             </View>
           )}
-          {/* Chat + input dock — sits at the bottom of the column. Keyboard
-              avoidance is handled by Android's softwareKeyboardLayoutMode:"resize"
-              (in app.json) + flex-based layout above, so the OS automatically
-              shrinks the available height when keyboard opens and the input
-              naturally lands above it on every device size. */}
+          {/* Keep only the composer attached to the IME. Moving the full-screen
+              foreground does not work reliably with Android edge-to-edge rooms
+              because that layer is absolutely positioned. KeyboardStickyView
+              follows the native keyboard frame instead, placing this row
+              directly above the keyboard on every animation frame. */}
           {renderChatList()}
-          {renderInteractiveBar()}
+          <KeyboardStickyView style={styles.keyboardComposerDock}>
+            {renderInteractiveBar()}
+          </KeyboardStickyView>
 
           {/* Floating Actions Cluster (Join Call & Heart) */}
           {!isHostView && !isKeyboardVisible && (
@@ -6849,14 +7961,12 @@ export default function BroadcastRoomScreen() {
               </TouchableOpacity>
             </View>
           )}
-            </>
-          )}
 
 
         </View>
 
         {/* Full Screen Lottie Magic Animation overlay */}
-        {!audioGameCovered && activeGiftAnimation.source && (
+        {activeGiftAnimation.source && (
           <View style={styles.lottieFullScreenContainer} pointerEvents="none">
             <LottieView
               key={activeGiftAnimation.id}
@@ -6874,7 +7984,7 @@ export default function BroadcastRoomScreen() {
             />
           </View>
         )}
-        {!audioGameCovered && activeMallIntro && activeMallIntroSource ? (
+        {activeMallIntro ? (
           <MallIntroOverlay
             key={activeMallIntro.id}
             intro={activeMallIntro}
@@ -6885,7 +7995,8 @@ export default function BroadcastRoomScreen() {
 
         {/* Gift sender banner — rendered AFTER the gift animation so the
             sender's name sits ON TOP of the gift, not hidden behind it. */}
-        {!audioGameCovered && renderFloatingGiftToast()}
+        {renderFloatingGiftToast()}
+        {!gameSheetOpen ? renderGlobalLiveAnnouncement() : null}
 
         {/* Modals placed last to overlay correctly naturally */}
         {renderLiveEndedForViewer()}
@@ -6893,7 +8004,7 @@ export default function BroadcastRoomScreen() {
         {renderMusicPickerModal()}
         {renderManageCallsModal()}
         {renderGamesBottomSheet()}
-        {!audioGameCovered && renderGiftBottomSheet()}
+        {renderGiftBottomSheet()}
         {renderTopUpModal()}
         {renderHostProfileModal()}
         {renderPremiumAdminModal()}
@@ -6905,8 +8016,8 @@ export default function BroadcastRoomScreen() {
         {renderReportModal()}
         {renderRankingSheet()}
         {renderLuckyBagDropModal()}
-        {!audioGameCovered && renderActiveLuckyBag()}
-        {!audioGameCovered && renderLuckyBagWinnersModal()}
+        {renderActiveLuckyBag()}
+        {renderLuckyBagWinnersModal()}
         {renderBeautySheet()}
         {renderHostToolsSheet()}
         {renderHostMoreMenu()}
@@ -6914,7 +8025,7 @@ export default function BroadcastRoomScreen() {
         {/* Audio room background picker — host-only, audio-only. The
             sheet itself enforces the same gates, but rendering only
             when relevant keeps the modal tree tidy. */}
-        {isHostView && isAudio && !audioGameCovered && (
+        {isHostView && isAudio && (
           <AudioTemplateSheet
             visible={showAudioTemplates}
             onClose={() => setShowAudioTemplates(false)}
@@ -6923,10 +8034,10 @@ export default function BroadcastRoomScreen() {
             onApplied={(id) => setActiveTemplateId(id)}
           />
         )}
-        {!audioGameCovered && showSFXMenu && renderSFXMenu()}
+        {showSFXMenu && renderSFXMenu()}
 
         {/* Floating Reactions Layer */}
-        {!audioGameCovered && (
+        {(
           <View style={styles.reactionsOverlay} pointerEvents="none">
             {reactions.map(reaction => (
               <FloatingEmoji key={reaction.id} type={reaction.type} offset={reaction.x} />
@@ -6941,49 +8052,43 @@ export default function BroadcastRoomScreen() {
 // Marquee Text Component for auto-scrolling long names/titles
 const MarqueeText = ({ text, style, containerWidth }) => {
   const scrollAnim = useRef(new Animated.Value(0)).current;
-  const [contentWidth, setContentWidth] = useState(0);
+  const animationRef = useRef(null);
+  const [textWidth, setTextWidth] = useState(0);
   const [containerMeasuredWidth, setContainerMeasuredWidth] = useState(containerWidth || 0);
 
   useEffect(() => {
-    if (contentWidth > containerMeasuredWidth && containerMeasuredWidth > 0) {
+    animationRef.current?.stop?.();
+    if (textWidth > containerMeasuredWidth && containerMeasuredWidth > 0) {
       scrollAnim.setValue(0);
-      const duration = (contentWidth / 40) * 1000; // Adjust speed here
-
-      Animated.loop(
+      const distance = textWidth + 24;
+      const duration = Math.max(3500, (distance / 32) * 1000);
+      animationRef.current = Animated.loop(
         Animated.timing(scrollAnim, {
-          toValue: -contentWidth - 20, // Move past the content + gap
+          toValue: -distance,
           duration: duration,
           easing: Easing.linear,
           useNativeDriver: true,
-        })
-      ).start();
+        }),
+      );
+      animationRef.current.start();
     } else {
       scrollAnim.stopAnimation();
       scrollAnim.setValue(0);
     }
-  }, [contentWidth, containerMeasuredWidth, text]);
+    return () => animationRef.current?.stop?.();
+  }, [textWidth, containerMeasuredWidth, text, scrollAnim]);
+
+  const shouldScroll = textWidth > containerMeasuredWidth && containerMeasuredWidth > 0;
 
   return (
     <View
       style={[{ overflow: 'hidden', width: containerMeasuredWidth || 'auto' }, style]}
       onLayout={(e) => !containerWidth && setContainerMeasuredWidth(e.nativeEvent.layout.width)}
     >
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        scrollEnabled={false}
-        contentContainerStyle={{ flexDirection: 'row' }}
-      >
-        <Animated.View
-          style={{ flexDirection: 'row', transform: [{ translateX: scrollAnim }] }}
-          onLayout={(e) => setContentWidth(e.nativeEvent.layout.width)}
-        >
-          <Text style={style}>{text}</Text>
-          {contentWidth > containerMeasuredWidth && (
-            <Text style={[style, { marginLeft: 20 }]}>{text}</Text>
-          )}
-        </Animated.View>
-      </ScrollView>
+      <Animated.View style={{ flexDirection: 'row', transform: [{ translateX: scrollAnim }] }}>
+        <Text style={style} numberOfLines={1} onLayout={(e) => setTextWidth(e.nativeEvent.layout.width)}>{text}</Text>
+        {shouldScroll && <Text style={[style, { marginLeft: 24 }]} numberOfLines={1}>{text}</Text>}
+      </Animated.View>
     </View>
   );
 };
@@ -7031,6 +8136,7 @@ const styles = StyleSheet.create({
   videoOverlayGradient: { position: 'absolute', bottom: 0, width: '100%', height: height * 0.4 },
   audioBackgroundBlur: { ...StyleSheet.absoluteFillObject, resizeMode: 'cover' },
   overlayForeground: { ...StyleSheet.absoluteFillObject, flexDirection: 'column', justifyContent: 'space-between' },
+  keyboardComposerDock: { zIndex: 300, elevation: 300 },
 
   lottieFullScreenContainer: {
     ...StyleSheet.absoluteFillObject,
@@ -7076,13 +8182,13 @@ const styles = StyleSheet.create({
   // when the right-side viewer cluster grows, and minWidth: 0 so
   // children with intrinsic widths (the marquee) don't push the
   // whole container past the available row width.
-  topLeftContainer: { flex: 1, minWidth: 0, marginRight: 8 },
+  topLeftContainer: { flexShrink: 0, minWidth: 0, marginRight: 8 },
   swipeHint: { position: 'absolute', alignSelf: 'center', left: 0, right: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 3, zIndex: 111 },
   swipeHintText: { color: 'rgba(255,255,255,0.85)', fontSize: 10, fontWeight: '700', letterSpacing: 0.4, backgroundColor: 'rgba(0,0,0,0.45)', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
-  broadcasterPanelWrapper: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.45)', borderRadius: 25, paddingRight: 4, borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)' },
-  broadcasterPanel: { flexDirection: 'row', alignItems: 'center', padding: 4, paddingRight: 8 },
+  broadcasterPanelWrapper: { width: '100%', flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.45)', borderRadius: 25, paddingRight: 4, borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)' },
+  broadcasterPanel: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', padding: 4, paddingRight: 4 },
   hostAvatarSmall: { width: 40, height: 40, borderRadius: 20 },
-  hostInfo: { marginHorizontal: 10, justifyContent: 'center' },
+  hostInfo: { flex: 1, minWidth: 0, marginHorizontal: 6, justifyContent: 'center' },
   hostName: { color: '#FFF', fontSize: 13, fontWeight: '700', textShadowColor: 'rgba(0,0,0,0.5)', textShadowOffset: { width: 1, height: 1 }, textShadowRadius: 3 },
   viewerCountBubble: { flexDirection: 'row', alignItems: 'center', marginTop: 2 },
   viewerCountText: { color: 'rgba(255,255,255,0.8)', fontSize: 10, marginLeft: 4, fontWeight: 'bold' },
@@ -7467,26 +8573,78 @@ const styles = StyleSheet.create({
   entranceGradient: { paddingHorizontal: 16, paddingVertical: 6, borderRadius: 16 },
   entranceText: { color: '#F472B6', fontSize: 12, fontWeight: 'bold' },
   chatMessageRow: { marginBottom: 8, flexDirection: 'row' },
-  chatBubble: { backgroundColor: 'rgba(0,0,0,0.4)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, maxWidth: width * 0.75 },
+  // The bubble follows its content, while every banner is measured by its
+  // wrapper so the artwork cannot escape the rounded container.
+  chatBubble: { backgroundColor: 'rgba(0,0,0,0.4)', paddingHorizontal: 8, paddingVertical: 5, borderRadius: 13, maxWidth: Math.min(width * 0.88, 390), alignSelf: 'flex-start', overflow: 'hidden' },
   giftChatBubble: { backgroundColor: 'rgba(244,114,182,0.18)', borderWidth: 1, borderColor: 'rgba(244,114,182,0.45)' },
   chatUserText: { color: '#FFF', fontSize: 13, lineHeight: 18 },
+  chatIdentityTopRow: { flexDirection: 'row', alignItems: 'center', gap: 3, minHeight: 18 },
+  chatPrimaryIdentityRow: { flexDirection: 'row', alignItems: 'flex-start', minHeight: 38, marginBottom: 2, gap: 6, alignSelf: 'flex-start', maxWidth: Math.min(width * 0.82, 365) },
+  chatCommentAvatar: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#20175A', borderWidth: 1, borderColor: 'rgba(255,255,255,0.25)', flexShrink: 0 },
+  chatIdentityStack: { flexGrow: 0, flexShrink: 1, minWidth: 0, height: 38, justifyContent: 'space-between', paddingTop: 0 },
+  chatIdentityFirstLine: { height: 18, flexDirection: 'row', alignItems: 'center', gap: 2, minWidth: 0, marginTop: -2, alignSelf: 'flex-start' },
+  chatIdentitySecondLine: { height: 18, flexDirection: 'row', alignItems: 'center', gap: 3, minWidth: 0, alignSelf: 'flex-start' },
+  chatFullName: { flexShrink: 1, maxWidth: Math.min(width * 0.3, 138), fontSize: 12, fontWeight: '800' },
+  chatAdminTag: { width: 66, height: 18, flexShrink: 0 },
+  chatIdentityPlate: { alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  chatIdentityFrame: { ...StyleSheet.absoluteFillObject, width: undefined, height: undefined },
+  chatMembershipPlate: { width: 60, height: 18 },
+  chatLevelPlate: { width: 50, height: 18, flexShrink: 0 },
+  chatNamePlate: { width: 90, height: 18, marginTop: 0 },
+  chatMembershipLabel: { color: '#FFF', fontSize: 7, fontWeight: '900', marginLeft: 8, textShadowColor: '#000', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 2 },
+  chatLevelLabel: { color: '#FFF', fontSize: 7, fontWeight: '800', marginLeft: 5, textShadowColor: '#000', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 2 },
+  chatNameLabel: { color: '#FFF', fontSize: 7, fontWeight: '700', maxWidth: 60, marginLeft: 12, textShadowColor: '#000', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 2 },
+  chatHostMarker: { color: '#FBBF24', fontSize: 6, fontWeight: '900' },
+  chatGuardianMarker: { color: '#C084FC', fontSize: 11, fontWeight: '700' },
+  chatCommentText: { color: '#FFF', fontSize: 11, lineHeight: 15, fontWeight: '400', marginTop: 2 },
   liveNotifBlock: {
+    width: '100%',
+    aspectRatio: 3,
+    position: 'relative',
+    marginVertical: 3,
+  },
+  liveNotifFrame: { ...StyleSheet.absoluteFillObject, width: undefined, height: undefined },
+  liveNotifContent: {
+    position: 'absolute',
+    left: '19%',
+    right: '19%',
+    top: '35%',
+    bottom: '34%',
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 14,
-    borderWidth: 1,
-    marginVertical: 3,
-    marginHorizontal: 4,
   },
-  liveNotifIcon: { fontSize: 22, marginRight: 10 },
-  liveNotifBody: { color: '#FFF', fontSize: 12, fontWeight: '600' },
-  liveNotifCta:  { fontSize: 11, fontWeight: '800', marginTop: 2 },
+  liveNotifAvatar: { width: 24, height: 24, borderRadius: 12, borderWidth: 1, borderColor: '#D9A62E', marginRight: 5, flexShrink: 0 },
+  liveNotifIconWrap: { width: 24, height: 24, borderRadius: 12, borderWidth: 1, borderColor: '#D9A62E', marginRight: 5, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  liveNotifIcon: { fontSize: 14 },
+  liveNotifCopy: { flex: 1, minWidth: 0 },
+  liveNotifBody: { color: '#57321D', fontSize: 8.5, lineHeight: 10, fontWeight: '900' },
+  liveNotifCta:  { color: '#9A5A16', fontSize: 7.5, lineHeight: 9, fontWeight: '900' },
+  globalLiveAnnouncement: {
+    position: 'absolute',
+    left: 4,
+    right: 4,
+    zIndex: 180,
+    elevation: 180,
+    aspectRatio: 3,
+  },
+  globalLiveAnnouncementContent: {
+    position: 'absolute',
+    left: '19%',
+    right: '19%',
+    top: '35%',
+    bottom: '34%',
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  globalLiveAnnouncementFrame: { ...StyleSheet.absoluteFillObject, width: undefined, height: undefined },
+  globalLiveAnnouncementAvatar: { width: 34, height: 34, borderRadius: 17, marginRight: 7, borderWidth: 1.5, borderColor: '#D9A62E', flexShrink: 0 },
+  globalLiveAnnouncementIconWrap: { width: 34, height: 34, borderRadius: 17, borderWidth: 1.5, borderColor: '#D9A62E', marginRight: 7, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  globalLiveAnnouncementIcon: { fontSize: 19 },
+  globalLiveAnnouncementText: { flex: 1, minWidth: 0, color: '#57321D', fontSize: 11.5, lineHeight: 14, fontWeight: '900' },
   inputAreaWrap: { paddingHorizontal: 16, marginTop: 4 },
   inputArea: { flexDirection: 'row', alignItems: 'center' },
   chatInputWrapper: { flex: 1, height: 44, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 22, paddingLeft: 16, paddingRight: 8, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' },
-  chatInput: { color: '#FFF', fontSize: 14, flex: 1, height: '100%' },
+  chatInput: { color: '#FFF', fontSize: 12, fontWeight: '400', flex: 1, height: '100%' },
   sendIconInside: { padding: 6, justifyContent: 'center', alignItems: 'center' },
   actionCircleBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', marginLeft: 8 },
   giftCircleBtn: { backgroundColor: BRAND.primary, shadowColor: BRAND.primary, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.5, shadowRadius: 6, elevation: 4 },
@@ -7501,6 +8659,69 @@ const styles = StyleSheet.create({
   moreOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   moreSheet: { backgroundColor: BRAND.splashBg, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingTop: 8, paddingHorizontal: 20 },
   moreTitle: { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginTop: 8, marginBottom: 16 },
+
+  // ---- Beauty panel -------------------------------------------------------
+  // Its own sheet rather than `moreSheet`: this one is a fixed 60% of the screen
+  // with a scrolling body, while moreSheet is shared by sheets that size to
+  // their content.
+  beautyBackdrop: { ...StyleSheet.absoluteFillObject },
+  beautySheet: {
+    backgroundColor: BRAND.splashBg,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingTop: 6,
+    paddingHorizontal: 20,
+    height: height * 0.6,
+  },
+  beautyHeader: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingTop: 10, paddingBottom: 8,
+  },
+  beautyHeaderTitle: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  beautyTitleText: { color: '#FFF', fontSize: 17, fontWeight: 'bold' },
+  beautyCloseBtn: {
+    width: 32, height: 32, borderRadius: 16,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.10)',
+  },
+  beautyScroll: { flex: 1 },
+  beautyScrollContent: { paddingBottom: 16 },
+  beautySubtitle: {
+    color: 'rgba(255,255,255,0.5)', fontSize: 11,
+    textAlign: 'center', marginBottom: 14,
+  },
+
+  // Generous vertical padding so the thin track still has a thumb-sized target,
+  // and horizontal padding equal to the knob radius so the knob is never clipped
+  // at either end of the range.
+  sliderHitArea: { height: 34, justifyContent: 'center', paddingHorizontal: BEAUTY_KNOB_R },
+  sliderInner: { justifyContent: 'center' },
+  sliderTrack: {
+    height: 6, borderRadius: 3,
+    backgroundColor: 'rgba(255,255,255,0.12)', overflow: 'hidden',
+  },
+  sliderFill: { height: '100%', borderRadius: 3 },
+  sliderKnob: {
+    position: 'absolute', width: 20, height: 20, borderRadius: 10,
+    backgroundColor: '#FFF', borderWidth: 3, marginLeft: -10,
+  },
+
+  filterTileRow: { flexDirection: 'row', gap: 10, marginBottom: 12 },
+  filterTile: { flex: 1, alignItems: 'center' },
+  filterTileArt: {
+    width: '100%', aspectRatio: 1, maxHeight: 58, borderRadius: 14, borderWidth: 1,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  filterTileCheck: {
+    position: 'absolute', top: -5, right: -5,
+    width: 18, height: 18, borderRadius: 9,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  filterTileLabel: {
+    color: 'rgba(255,255,255,0.8)', fontSize: 11,
+    fontWeight: '600', marginTop: 6,
+  },
   moreGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 20 },
   moreItem: { alignItems: 'center', width: 64 },
   moreIconBox: { width: 56, height: 56, borderRadius: 28, justifyContent: 'center', alignItems: 'center', marginBottom: 6 },
@@ -7545,6 +8766,20 @@ const styles = StyleSheet.create({
   /* Gift Bottom Sheet Styles */
   giftModalOverlay: { flex: 1, backgroundColor: 'transparent', justifyContent: 'flex-end' },
   giftModalContent: { backgroundColor: '#0F091E', borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingTop: 6 },
+  liveGameHeader: { height: 42, flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.12)', backgroundColor: '#0F091E' },
+  liveGameBackButton: { width: 44, height: 42, alignItems: 'center', justifyContent: 'center' },
+  liveGameHeaderTitle: { flex: 1, color: '#FFFFFF', fontSize: 14, fontWeight: '800', textAlign: 'center' },
+  liveGameHeaderSpacer: { width: 44, height: 42 },
+  liveGameCanvas: { flex: 1 },
+  liveGameFloatingBack: {
+    position: 'absolute', top: -14, right: 3, zIndex: 20,
+    width: 30, height: 30, borderRadius: 15,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.78)',
+    borderWidth: 1, borderColor: 'rgba(255,215,106,0.65)',
+    elevation: 8,
+  },
+  liveGameFloatingBackTeen: { top: -23, right: -3 },
   // Visual drag indicator at the top of every bottom-sheet so the modal
   // reads as dismissible even though the close X is also there.
   giftDragHandle: { width: 36, height: 4, backgroundColor: 'rgba(255,255,255,0.18)', borderRadius: 2, alignSelf: 'center', marginBottom: 8 },
@@ -7561,6 +8796,8 @@ const styles = StyleSheet.create({
   // every screen size gets a coherent tile/icon/lottie/font set.
   giftGridRow: { justifyContent: 'flex-start', paddingHorizontal: GIFT_GRID_HPAD / 2, paddingVertical: 3 },
   giftItemCard: { width: GIFT_TILE_W, alignItems: 'center', paddingVertical: 6, borderRadius: 12 },
+  giftItemCardSelected: { backgroundColor: `${BRAND.primary}2E`, borderWidth: 2, borderColor: '#20E36A', shadowColor: '#20E36A', shadowOpacity: 0.85, shadowRadius: 8, shadowOffset: { width: 0, height: 0 }, elevation: 8 },
+  giftSelectedBadge: { position: 'absolute', top: 3, right: 7, width: 21, height: 21, borderRadius: 11, backgroundColor: '#16C95B', borderWidth: 2, borderColor: '#E9FFF0', alignItems: 'center', justifyContent: 'center', zIndex: 5 },
   giftIconPlaceholder: { width: GIFT_ICON_SIZE, height: GIFT_ICON_SIZE, backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: GIFT_ICON_SIZE / 2, justifyContent: 'center', alignItems: 'center', marginBottom: 4, overflow: 'hidden' },
   giftName: { color: '#FFF', fontSize: GIFT_NAME_FONT, marginBottom: 2, textAlign: 'center' },
   giftPriceRow: { flexDirection: 'row', alignItems: 'center' },
@@ -7590,37 +8827,33 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20, paddingTop: 18, paddingBottom: 4,
   },
   gamePickerTitle:    { color: '#FFF', fontSize: 18, fontWeight: '900', letterSpacing: 0.3 },
-  gamePickerSubtitle: { color: 'rgba(255,255,255,0.5)', fontSize: 11, marginTop: 2 },
   gamePickerClose:    { width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.08)', alignItems: 'center', justifyContent: 'center' },
 
   gameTileGrid: {
     flexDirection: 'row', flexWrap: 'wrap',
-    paddingHorizontal: 16, paddingTop: 16, gap: 12,
+    paddingHorizontal: 12, paddingTop: 14, gap: 8,
   },
   gameTile: {
-    width: '47.5%', aspectRatio: 0.85,
-    borderRadius: 18, overflow: 'hidden',
+    width: '31%', aspectRatio: 0.92,
+    borderRadius: 15, overflow: 'hidden',
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
   },
   gameTileGrad: {
-    flex: 1, padding: 14, justifyContent: 'space-between',
+    flex: 1, paddingHorizontal: 6, paddingVertical: 10,
+    alignItems: 'center', justifyContent: 'center',
   },
   gameTileIconWrap: {
-    width: 52, height: 52, borderRadius: 26,
+    width: 46, height: 46, borderRadius: 23,
     backgroundColor: 'rgba(0,0,0,0.25)',
     alignItems: 'center', justifyContent: 'center',
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
   },
   gameTileEmoji: { fontSize: 28 },
-  gameTileName:  { color: '#FFF', fontSize: 15, fontWeight: '800', marginTop: 8 },
-  gameTileDesc:  { color: 'rgba(255,255,255,0.55)', fontSize: 11, marginTop: 4, lineHeight: 15 },
-  gameTileChip:  {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    alignSelf: 'flex-start', marginTop: 8,
-    paddingHorizontal: 7, paddingVertical: 3,
-    backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: 10,
+  gameTileIconImage: { width: 42, height: 42, borderRadius: 11 },
+  gameTileName:  {
+    color: '#FFF', fontSize: 11, lineHeight: 14, fontWeight: '800',
+    marginTop: 7, textAlign: 'center', minHeight: 28,
   },
-  gameTileChipText: { color: '#FBBF24', fontSize: 9, fontWeight: '800', letterSpacing: 0.4, textTransform: 'uppercase' },
 
   gameTileEmpty: {
     flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 40,
@@ -7937,7 +9170,7 @@ const styles = StyleSheet.create({
   // Portrait video tile. Android's RtcSurfaceView (SurfaceView) doesn't fully
   // clip to rounded corners, so we keep a moderate radius and a slightly
   // thicker solid border that masks any minor corner bleed.
-  guestVideoBox: { width: 112, height: 150, borderRadius: 12, overflow: 'hidden', borderWidth: 3, borderColor: '#2D1B4E', backgroundColor: '#000', elevation: 8, shadowColor: '#000', shadowOpacity: 0.4, shadowRadius: 8 },
+  guestVideoBox: { width: 88, height: 118, borderRadius: 10, overflow: 'hidden', borderWidth: 2, borderColor: '#2D1B4E', backgroundColor: '#000', elevation: 8, shadowColor: '#000', shadowOpacity: 0.4, shadowRadius: 8 },
   guestVideoFeed: { width: '100%', height: '100%', borderRadius: 10, overflow: 'hidden', resizeMode: 'cover' },
   guestTileSpeaking: { shadowColor: '#38BDF8', shadowOpacity: 0.85, shadowRadius: 10, shadowOffset: { width: 0, height: 0 }, elevation: 14 },
   guestTileGuardian: { position: 'absolute', top: -2, alignSelf: 'center', backgroundColor: '#A855F7', minWidth: 20, height: 20, borderRadius: 10, paddingHorizontal: 5, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: '#0E111E', zIndex: 20, left: 0, right: 0, marginLeft: 'auto', marginRight: 'auto' },

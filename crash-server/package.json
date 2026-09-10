@@ -1,0 +1,35 @@
+{
+  "name": "popular-live-crash-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test test/*.test.ts",
+    "test:load": "node --import tsx test/load.ts",
+    "start": "node dist/src/index.js",
+    "dev": "tsx watch src/index.ts"
+  },
+  "dependencies": {
+    "@socket.io/redis-adapter": "^8.3.0",
+    "@supabase/supabase-js": "^2.57.4",
+    "dotenv": "^17.2.2",
+    "pino": "^9.9.4",
+    "prom-client": "^15.1.3",
+    "redis": "^5.8.2",
+    "socket.io": "^4.8.1",
+    "ws": "^8.21.3",
+    "zod": "^4.1.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.1",
+    "@types/ws": "^8.18.1",
+    "socket.io-client": "^4.8.3",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  }
+}

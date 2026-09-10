@@ -15,8 +15,7 @@
  *   formatCompactNumber(0)      => "0"
  *
  * The rounding rule (toFixed(1) below 10k, toFixed(0) above) matches
- * the original duplicated implementation in TeenPatti.js + FruitRoulette.js
- * exactly so callers don't see a label change.
+ * the original game formatting exactly so callers don't see a label change.
  */
 export function formatCompactNumber(num) {
   const n = Number(num);

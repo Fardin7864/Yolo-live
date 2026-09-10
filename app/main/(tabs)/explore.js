@@ -5,9 +5,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system';
 import { useGlobalState } from '../../../src/context/GlobalStateContext';
 import { supabase } from '../../../src/api/supabase';
+import { fetchExploreRanking } from '../../../src/api/exploreRankings';
 import LogoLoader from '../../../src/components/LogoLoader';
 import { showCuteAlert } from '../../../src/components/CuteAlert';
 import { BRAND } from '../../../src/theme/brand';
@@ -18,6 +18,33 @@ const TIER_ICONS  = {
   1: 'https://img.icons8.com/3d-fluency/94/crown.png',
   2: 'https://img.icons8.com/fluency/96/silver-medal.png',
   3: 'https://img.icons8.com/fluency/96/bronze-medal.png',
+};
+
+const estimateBase64SizeKb = (base64) => Math.round((String(base64 || '').length * 3 / 4) / 1024);
+const base64ToArrayBuffer = (base64) => {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  const lookup = {};
+  for (let i = 0; i < chars.length; i += 1) lookup[chars[i]] = i;
+  const clean = String(base64 || '').replace(/=+$/, '');
+  const bytes = [];
+  for (let i = 0; i < clean.length; i += 4) {
+    const a = lookup[clean[i]] ?? 0;
+    const b = lookup[clean[i + 1]] ?? 0;
+    const c = lookup[clean[i + 2]] ?? 0;
+    const d = lookup[clean[i + 3]] ?? 0;
+    const triplet = (a << 18) | (b << 12) | (c << 6) | d;
+    bytes.push((triplet >> 16) & 255);
+    if (i + 2 < clean.length) bytes.push((triplet >> 8) & 255);
+    if (i + 3 < clean.length) bytes.push(triplet & 255);
+  }
+  return new Uint8Array(bytes).buffer;
+};
+
+const extensionForMime = (mimeType) => {
+  const type = String(mimeType || '').toLowerCase();
+  if (type.includes('png')) return 'png';
+  if (type.includes('webp')) return 'webp';
+  return 'jpg';
 };
 
 const relativeTime = (iso) => {
@@ -57,6 +84,8 @@ export default function ExploreScreen() {
   // Daily top broadcasters
   const [topBroadcasters, setTopBroadcasters] = useState([]); // top 3 for the widget
   const [topAll, setTopAll]                   = useState([]); // top 20 for the sheet
+  const [loadingTopBroadcasters, setLoadingTopBroadcasters] = useState(true);
+  const [topBroadcastersError, setTopBroadcastersError] = useState('');
 
   // Podium order is derived state — index swap so #1 sits in the centre.
   // Computed once per change to `topBroadcasters` instead of every render
@@ -69,28 +98,63 @@ export default function ExploreScreen() {
   );
   const broadcasterRankMap = useMemo(() => {
     const m = new Map();
-    topBroadcasters.forEach((b, i) => m.set(b?.broadcaster_id, i + 1));
+    topBroadcasters.forEach((b, i) => m.set(b?.profile_id, i + 1));
     return m;
   }, [topBroadcasters]);
   const [showTopAllSheet, setShowTopAllSheet] = useState(false);
   const [loadingTopAll, setLoadingTopAll]     = useState(false);
+  const [topAllError, setTopAllError]         = useState('');
+  const [showTopGifters, setShowTopGifters]   = useState(false);
+  const [gifterPeriod, setGifterPeriod]       = useState('daily');
+  const [topGifters, setTopGifters]           = useState([]);
+  const [loadingGifters, setLoadingGifters]   = useState(false);
+  const [topGiftersError, setTopGiftersError] = useState('');
 
   const loadTopBroadcasters = useCallback(async () => {
-    const { data, error } = await supabase.rpc('get_top_broadcasters_24h', { limit_n: 3 });
-    if (error) { console.warn('top broadcasters:', error.message); return; }
-    setTopBroadcasters(Array.isArray(data) ? data : []);
+    setLoadingTopBroadcasters(true);
+    setTopBroadcastersError('');
+    try {
+      setTopBroadcasters(await fetchExploreRanking({ kind: 'host', period: 'daily', limit: 3 }));
+    } catch (error) {
+      console.warn('top broadcasters:', error?.message);
+      setTopBroadcastersError('Could not load host rankings.');
+    } finally {
+      setLoadingTopBroadcasters(false);
+    }
   }, []);
 
   const loadTopAll = useCallback(async () => {
     setLoadingTopAll(true);
-    const { data, error } = await supabase.rpc('get_top_broadcasters_24h', { limit_n: 20 });
-    if (error) console.warn('top broadcasters all:', error.message);
-    setTopAll(Array.isArray(data) ? data : []);
-    setLoadingTopAll(false);
+    setTopAllError('');
+    try {
+      setTopAll(await fetchExploreRanking({ kind: 'host', period: 'daily', limit: 20 }));
+    } catch (error) {
+      console.warn('top broadcasters all:', error?.message);
+      setTopAllError('Could not load host rankings.');
+    } finally {
+      setLoadingTopAll(false);
+    }
   }, []);
 
   useEffect(() => { loadTopBroadcasters(); }, [loadTopBroadcasters]);
   useEffect(() => { if (showTopAllSheet) loadTopAll(); }, [showTopAllSheet, loadTopAll]);
+
+  const loadTopGifters = useCallback(async (periodKey = 'daily') => {
+    setLoadingGifters(true);
+    setTopGiftersError('');
+    try {
+      setTopGifters(await fetchExploreRanking({ kind: 'gifter', period: periodKey, limit: 50 }));
+    } catch (error) {
+      console.warn('top gifters:', error?.message);
+      setTopGiftersError('Could not load gifter rankings.');
+    } finally {
+      setLoadingGifters(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (showTopGifters) loadTopGifters(gifterPeriod);
+  }, [showTopGifters, gifterPeriod, loadTopGifters]);
 
   // ----- Load moments from DB -----
   const loadMoments = useCallback(async () => {
@@ -149,7 +213,7 @@ export default function ExploreScreen() {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadMoments();
+    await Promise.all([loadMoments(), loadTopBroadcasters()]);
     setRefreshing(false);
   };
 
@@ -158,37 +222,40 @@ export default function ExploreScreen() {
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,  // built-in cropper trims most large photos
       quality: 0.6,         // 60% JPEG keeps typical phone photos under ~500KB
+      base64: true,
     });
     if (result.canceled) return;
 
-    const uri = result.assets[0].uri;
-    // Reject anything still larger than 500 KB so storage stays cheap.
-    try {
-      const info = await FileSystem.getInfoAsync(uri, { size: true });
-      const sizeKb = info?.size ? Math.round(info.size / 1024) : 0;
-      if (sizeKb > MAX_MOMENT_IMAGE_KB) {
-        showCuteAlert(
-          'Image too large',
-          `This image is ${sizeKb} KB. Please pick a smaller image (under ${MAX_MOMENT_IMAGE_KB} KB) or crop it tighter.`
-        );
-        return;
-      }
-    } catch (e) {
-      console.warn('size check failed:', e?.message);
+    const asset = result.assets[0];
+    const sizeKb = asset.fileSize
+      ? Math.round(asset.fileSize / 1024)
+      : estimateBase64SizeKb(asset.base64);
+    if (sizeKb > MAX_MOMENT_IMAGE_KB) {
+      showCuteAlert(
+        'Image too large',
+        `This image is ${sizeKb} KB. Please pick a smaller image (under ${MAX_MOMENT_IMAGE_KB} KB) or crop it tighter.`
+      );
+      return;
     }
-    setPostImage(uri);
+    setPostImage({
+      uri: asset.uri,
+      base64: asset.base64,
+      mimeType: asset.mimeType || 'image/jpeg',
+    });
   };
 
   // Upload a local URI to Supabase Storage and return the public URL.
-  const uploadMomentImage = async (localUri) => {
-    if (!localUri || !user?.id) return null;
-    const ext = (localUri.split('.').pop() || 'jpg').toLowerCase();
+  const uploadMomentImage = async (imageAsset) => {
+    if (!imageAsset || !user?.id) return null;
+    const ext = extensionForMime(imageAsset.mimeType);
     const fileName = `${user.id}-${Date.now()}.${ext}`;
-    const form = new FormData();
-    form.append('file', { uri: localUri, name: fileName, type: `image/${ext}` });
     const { error } = await supabase.storage
       .from('moments')
-      .upload(fileName, form, { cacheControl: '3600', upsert: true });
+      .upload(fileName, base64ToArrayBuffer(imageAsset.base64), {
+        cacheControl: '3600',
+        contentType: imageAsset.mimeType || 'image/jpeg',
+        upsert: true,
+      });
     if (error) {
       console.warn('moment image upload:', error.message);
       return null;
@@ -355,25 +422,34 @@ export default function ExploreScreen() {
             <Text style={styles.seeAllText}>View All</Text>
           </TouchableOpacity>
         </View>
-        {podiumOrder.length === 0 ? (
+        {loadingTopBroadcasters ? (
+          <View style={{ paddingVertical: 28, alignItems: 'center' }}>
+            <LogoLoader size="small" />
+          </View>
+        ) : topBroadcastersError ? (
+          <TouchableOpacity style={styles.rankingStatus} onPress={loadTopBroadcasters}>
+            <Text style={styles.rankingError}>{topBroadcastersError}</Text>
+            <Text style={styles.rankingRetry}>Tap to retry</Text>
+          </TouchableOpacity>
+        ) : podiumOrder.length === 0 ? (
           <View style={{ paddingVertical: 28, alignItems: 'center' }}>
             <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12 }}>
-              No gifts in the last 24h yet — be the first contributor!
+              No gifts today yet — be the first contributor!
             </Text>
           </View>
         ) : (
           <View style={styles.leaderboardBox}>
             {podiumOrder.map((b) => {
               // figure out this row's rank position in the original (sorted) list
-              const rank = broadcasterRankMap.get(b.broadcaster_id) || 0;
+              const rank = broadcasterRankMap.get(b.profile_id) || 0;
               const color   = TIER_COLORS[rank] || '#94A3B8';
               const iconObj = TIER_ICONS[rank];
-              const avatar  = b.avatar_url || `https://i.pravatar.cc/150?u=${b.broadcaster_id}`;
+              const avatar  = b.avatar_url || `https://i.pravatar.cc/150?u=${b.profile_id}`;
               return (
                 <TouchableOpacity
-                  key={b.broadcaster_id}
+                  key={b.profile_id}
                   style={[styles.rankItem, rank === 1 && styles.rankItemCenter]}
-                  onPress={() => router.push(`/main/user/${b.broadcaster_id}`)}
+                  onPress={() => router.push(`/main/user/${b.profile_id}`)}
                 >
                   <View style={styles.crownContainer}>
                     {iconObj && (
@@ -418,21 +494,26 @@ export default function ExploreScreen() {
             <Text style={{ color: '#FFF', fontSize: 16, fontWeight: 'bold', marginLeft: 8 }}>Top Broadcasters</Text>
           </View>
           <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 11, textAlign: 'center', marginBottom: 14 }}>
-            Last 24 hours · ranked by diamonds received
+            Today in Bangladesh · ranked by diamonds received
           </Text>
 
           {loadingTopAll ? (
             <View style={{ paddingVertical: 40, alignItems: 'center' }}>
               <LogoLoader size="medium" />
             </View>
+          ) : topAllError ? (
+            <TouchableOpacity style={styles.rankingStatus} onPress={loadTopAll}>
+              <Text style={styles.rankingError}>{topAllError}</Text>
+              <Text style={styles.rankingRetry}>Tap to retry</Text>
+            </TouchableOpacity>
           ) : topAll.length === 0 ? (
             <Text style={{ color: 'rgba(255,255,255,0.4)', textAlign: 'center', paddingVertical: 28, fontSize: 12 }}>
-              No activity in the last 24 hours.
+              No activity yet today.
             </Text>
           ) : (
             <FlatList
               data={topAll}
-              keyExtractor={(item) => item.broadcaster_id}
+              keyExtractor={(item) => item.profile_id}
               showsVerticalScrollIndicator={false}
               // Top-broadcasters list can be 100+ rows — virtualise so the
               // sheet doesn't mount every avatar on open.
@@ -446,13 +527,13 @@ export default function ExploreScreen() {
                 return (
                   <TouchableOpacity
                     style={styles.topAllRow}
-                    onPress={() => { setShowTopAllSheet(false); router.push(`/main/user/${item.broadcaster_id}`); }}
+                    onPress={() => { setShowTopAllSheet(false); router.push(`/main/user/${item.profile_id}`); }}
                   >
                     <View style={{ width: 30, alignItems: 'center' }}>
                       <Text style={{ color: medal, fontWeight: '800', fontSize: 14 }}>{rank}</Text>
                     </View>
                     <Image
-                      source={{ uri: item.avatar_url || `https://i.pravatar.cc/100?u=${item.broadcaster_id}` }}
+                      source={{ uri: item.avatar_url || `https://i.pravatar.cc/100?u=${item.profile_id}` }}
                       style={styles.topAllAvatar}
                     />
                     <View style={{ flex: 1, marginLeft: 12 }}>
@@ -479,6 +560,73 @@ export default function ExploreScreen() {
     </Modal>
   );
 
+  const renderTopGifterEntry = () => (
+    <TouchableOpacity style={styles.gifterEntryCard} activeOpacity={0.86} onPress={() => setShowTopGifters(true)}>
+      <LinearGradient colors={['rgba(124,58,237,0.34)', 'rgba(236,72,153,0.22)']} style={styles.gifterEntryGradient}>
+        <View style={styles.gifterEntryIcon}><Text style={{ fontSize: 26 }}>🎁</Text></View>
+        <View style={{ flex: 1, marginLeft: 12 }}>
+          <Text style={styles.gifterEntryTitle}>Top Gifter Ranking</Text>
+          <Text style={styles.gifterEntrySub}>Daily and monthly leaders · resets automatically</Text>
+        </View>
+        <Ionicons name="chevron-forward" size={22} color="#F9A8D4" />
+      </LinearGradient>
+    </TouchableOpacity>
+  );
+
+  const renderTopGiftersSheet = () => (
+    <Modal visible={showTopGifters} transparent animationType="slide" onRequestClose={() => setShowTopGifters(false)}>
+      <View style={styles.topAllOverlay}>
+        <View style={styles.topAllSheet}>
+          <View style={styles.modalHandleBar} />
+          <View style={styles.gifterSheetHeader}>
+            <View style={{ width: 30 }} />
+            <Text style={styles.gifterSheetTitle}>🎁 Top Gifters</Text>
+            <TouchableOpacity onPress={() => setShowTopGifters(false)}><Ionicons name="close-circle" size={28} color="rgba(255,255,255,.55)" /></TouchableOpacity>
+          </View>
+          <View style={styles.gifterTabs}>
+            {['daily', 'monthly'].map((key) => (
+              <TouchableOpacity key={key} style={[styles.gifterTab, gifterPeriod === key && styles.gifterTabActive]} onPress={() => setGifterPeriod(key)}>
+                <Text style={[styles.gifterTabText, gifterPeriod === key && styles.gifterTabTextActive]}>{key === 'daily' ? 'Daily' : 'Monthly'}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <Text style={styles.gifterResetNote}>{gifterPeriod === 'daily' ? 'Renews every day' : 'Renews on the first day of each month'}</Text>
+          {loadingGifters ? (
+            <View style={{ paddingVertical: 42, alignItems: 'center' }}><LogoLoader size="medium" /></View>
+          ) : topGiftersError ? (
+            <TouchableOpacity style={styles.rankingStatus} onPress={() => loadTopGifters(gifterPeriod)}>
+              <Text style={styles.rankingError}>{topGiftersError}</Text>
+              <Text style={styles.rankingRetry}>Tap to retry</Text>
+            </TouchableOpacity>
+          ) : topGifters.length === 0 ? (
+            <Text style={styles.gifterEmpty}>No gifts sent in this period yet.</Text>
+          ) : (
+            <FlatList
+              data={topGifters}
+              keyExtractor={(item) => item.profile_id}
+              showsVerticalScrollIndicator={false}
+              renderItem={({ item, index }) => {
+                const rank = index + 1;
+                return (
+                  <TouchableOpacity style={styles.topAllRow} onPress={() => { setShowTopGifters(false); router.push(`/main/user/${item.profile_id}`); }}>
+                    <Text style={[styles.gifterRank, rank <= 3 && { color: TIER_COLORS[rank] }]}>{rank}</Text>
+                    <Image source={{ uri: item.avatar_url || `https://i.pravatar.cc/100?u=${item.profile_id}` }} style={styles.topAllAvatar} />
+                    <View style={{ flex: 1, marginLeft: 12 }}>
+                      <Text style={styles.gifterName} numberOfLines={1}>{item.full_name || 'Gifter'}</Text>
+                      <Text style={styles.gifterCount}>{Number(item.gift_count || 0).toLocaleString()} gifts sent</Text>
+                    </View>
+                    <Ionicons name="diamond" size={13} color="#38BDF8" />
+                    <Text style={styles.gifterDiamonds}>{Number(item.total_diamonds || 0).toLocaleString()}</Text>
+                  </TouchableOpacity>
+                );
+              }}
+            />
+          )}
+        </View>
+      </View>
+    </Modal>
+  );
+
   const renderCreatePost = () => (
     <View style={styles.createPostCard}>
       <View style={styles.postInputRow}>
@@ -495,7 +643,7 @@ export default function ExploreScreen() {
       
       {postImage && (
         <View style={styles.selectedImageContainer}>
-          <Image source={{ uri: postImage }} style={styles.selectedImagePreview} />
+          <Image source={{ uri: postImage.uri }} style={styles.selectedImagePreview} />
           <TouchableOpacity style={styles.removeImageBtn} onPress={() => setPostImage(null)}>
             <Ionicons name="close-circle" size={24} color={BRAND.primary} />
           </TouchableOpacity>
@@ -714,6 +862,7 @@ export default function ExploreScreen() {
         {renderSearchBar()}
         <View style={{ height: 20 }} />
         {renderLeaderboard()}
+        {renderTopGifterEntry()}
         {renderCreatePost()}
         {renderMomentsFeed()}
         {renderMoodModal()}
@@ -721,6 +870,7 @@ export default function ExploreScreen() {
         {renderSearchModal()}
       </ScrollView>
       {renderTopAllSheet()}
+      {renderTopGiftersSheet()}
     </SafeAreaView>
   );
 }
@@ -733,6 +883,27 @@ const styles = StyleSheet.create({
   modalHandleBar:{ width: 40, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.2)', alignSelf: 'center', marginBottom: 10 },
   topAllRow:     { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' },
   topAllAvatar:  { width: 40, height: 40, borderRadius: 20 },
+  gifterEntryCard: { marginHorizontal: 16, marginBottom: 22, borderRadius: 18, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(244,114,182,.32)' },
+  gifterEntryGradient: { minHeight: 78, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center' },
+  gifterEntryIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: 'rgba(255,255,255,.1)', alignItems: 'center', justifyContent: 'center' },
+  gifterEntryTitle: { color: '#FFF', fontSize: 16, fontWeight: '800' },
+  gifterEntrySub: { color: 'rgba(255,255,255,.58)', fontSize: 11, marginTop: 4 },
+  gifterSheetHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
+  gifterSheetTitle: { color: '#FFF', fontSize: 18, fontWeight: '900' },
+  gifterTabs: { flexDirection: 'row', backgroundColor: 'rgba(255,255,255,.07)', padding: 4, borderRadius: 18 },
+  gifterTab: { flex: 1, paddingVertical: 9, borderRadius: 15, alignItems: 'center' },
+  gifterTabActive: { backgroundColor: BRAND.primary },
+  gifterTabText: { color: 'rgba(255,255,255,.55)', fontSize: 13, fontWeight: '700' },
+  gifterTabTextActive: { color: '#FFF' },
+  gifterResetNote: { color: 'rgba(255,255,255,.4)', fontSize: 10, textAlign: 'center', marginVertical: 10 },
+  gifterEmpty: { color: 'rgba(255,255,255,.45)', textAlign: 'center', paddingVertical: 36 },
+  gifterRank: { width: 30, textAlign: 'center', color: 'rgba(255,255,255,.5)', fontSize: 14, fontWeight: '900' },
+  gifterName: { color: '#FFF', fontSize: 13, fontWeight: '700' },
+  gifterCount: { color: 'rgba(255,255,255,.42)', fontSize: 10, marginTop: 2 },
+  gifterDiamonds: { color: '#38BDF8', fontSize: 13, fontWeight: '800', marginLeft: 4 },
+  rankingStatus: { paddingVertical: 28, alignItems: 'center', justifyContent: 'center' },
+  rankingError: { color: '#FDA4AF', fontSize: 12, textAlign: 'center' },
+  rankingRetry: { color: '#C4B5FD', fontSize: 12, fontWeight: '800', marginTop: 7 },
 
   container: {
     flex: 1,

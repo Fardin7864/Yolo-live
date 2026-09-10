@@ -5,7 +5,7 @@ import { Animated, Image, StyleSheet, StatusBar, View } from 'react-native';
 import { supabase } from '../api/supabase';
 import { TENANT_CONFIG } from '../../tenant.config';
 
-const CACHE_KEY = 'care-live-active-splash';
+const CACHE_KEY = 'popular-live-active-splash';
 const DEFAULT_BACKGROUND = TENANT_CONFIG.splashBg || '#0F091E';
 const FADE_OUT_MS = 350;
 const FALLBACK_LOGO = require('../../assets/splash-icon.png');

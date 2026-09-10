@@ -9,6 +9,7 @@ import { useGlobalState } from '../../../src/context/GlobalStateContext';
 import { showCuteAlert } from '../../../src/components/CuteAlert';
 import { prewarmAgora, disposeWarmAgora } from '../../../src/api/agoraPrewarm';
 import { BRAND } from '../../../src/theme/brand';
+import { supabase } from '../../../src/api/supabase';
 
 const { width, height } = Dimensions.get('window');
 const LIVE_BACKGROUND = require('../../../assets/live-setup/background.webp');
@@ -17,7 +18,7 @@ const CLOSE_BUTTON = require('../../../assets/live-setup/close-button.webp');
 
 export default function LiveSetupScreen() {
   const router = useRouter();
-  const { user, startLiveStream } = useGlobalState();
+  const { user, ownedAgency, startLiveStream } = useGlobalState();
   const [title, setTitle] = useState('');
   const [activeTag, setActiveTag] = useState('Chat');
   const [broadcastType, setBroadcastType] = useState('Video Live');
@@ -217,6 +218,29 @@ export default function LiveSetupScreen() {
   }, [countdown]);
 
   const handleStartLive = async () => {
+    // Fast client-side explanation. The start_live_stream RPC repeats this
+    // check authoritatively so old/modified APKs cannot bypass it.
+    const normalizedRole = String(user?.role || 'user').trim().toLowerCase();
+    const requiresAgencyMembership = normalizedRole === 'user' && !ownedAgency;
+    if (requiresAgencyMembership) {
+      const { data: membership } = await supabase
+        .from('agency_members')
+        .select('agency_id, agencies:agency_id(status)')
+        .eq('host_id', user?.id)
+        .eq('status', 'active')
+        .maybeSingle();
+      if (!membership || membership.agencies?.status !== 'verified') {
+        showCuteAlert(
+          'Agency required',
+          'You need an approved agency membership before starting audio or video live.',
+          [
+            { text: 'Not now', style: 'cancel' },
+            { text: 'View Agencies', onPress: () => router.push('/main/agency') },
+          ],
+        );
+        return;
+      }
+    }
      // Check if permissions are granted before starting
      if (broadcastType !== 'Audio Live') {
        if (!cameraPermission?.granted || !microphonePermission?.granted) {
@@ -264,7 +288,7 @@ export default function LiveSetupScreen() {
   const handleShare = async () => {
     try {
       await Share.share({
-        message: `Join my awesome ${broadcastType} on Care Live! Download the app now.`,
+        message: `Join my awesome ${broadcastType} on Popular Live! Download the app now.`,
       });
     } catch (error) {
       showCuteAlert("Error", error.message);

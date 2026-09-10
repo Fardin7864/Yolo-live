@@ -29,18 +29,20 @@ export const GlobalStateProvider = ({ children }) => {
     live_enabled: true,
     gifting_enabled: true,
     games_enabled: true,
-    platform_name: 'Care Live',
+    platform_name: 'Popular Live',
   });
 
   // Per-game admin toggles (driven by `game_settings` table). Defaults
-  // keep all games visible until the first fetch lands so nothing
+  // keep supported games visible until the first fetch lands so nothing
   // flashes off on cold start.
   const [gameSettings, setGameSettings] = useState({
-    teen_patti:     { is_active: true, win_chance_percent: 50 },
-    fruit_roulette: { is_active: true, win_chance_percent: 50 },
     greedy_lion:    { is_active: true, win_chance_percent: 60 },
+    greedy_pro:     { is_active: true, win_chance_percent: 60 },
+    lucky_dice:     { is_active: true, win_chance_percent: 100 },
     tin_patti_pro:  { is_active: true, win_chance_percent: 60 },
+    crash:           { is_active: false },
   });
+  const [gameSettingsLoaded, setGameSettingsLoaded] = useState(false);
 
   // ============================================================
   // PROFILE FETCH
@@ -61,6 +63,9 @@ export const GlobalStateProvider = ({ children }) => {
       country: null,
       vipType: null,
       vipExpiresAt: null,
+      commentTagId: null,
+      commentTagName: null,
+      commentTagUrl: null,
       isBanned: false,
       agencyId: null,
       selectedProfileFrame: null,
@@ -77,11 +82,25 @@ export const GlobalStateProvider = ({ children }) => {
 
   const fetchProfile = async (userId, attempt = 0, authUser = null) => {
     try {
-      const { data, error } = await supabase
+      let profileResponse = await supabase
         .from('profiles')
-        .select('*')
+        .select('*, comment_tag:comment_tags(id, name, image_url)')
         .eq('id', userId)
         .maybeSingle();
+
+      // Keep this release usable while migration 126 is being applied.
+      // PostgREST cannot resolve the relation until its schema cache sees
+      // comment_tags/comment_tag_id, so fall back to the legacy profile
+      // query and simply omit the optional tag during that short window.
+      if (profileResponse.error && /comment[_ ]?tag|relationship/i.test(profileResponse.error.message || '')) {
+        profileResponse = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', userId)
+          .maybeSingle();
+      }
+
+      const { data, error } = profileResponse;
 
       if (error) throw error;
 
@@ -107,8 +126,19 @@ export const GlobalStateProvider = ({ children }) => {
       }
 
       if (data) {
+        if (data.is_banned === true || data.is_deleted === true) {
+          setUser(null);
+          setDiamonds(0);
+          setBeans(0);
+          setRole('user');
+          try { await supabase.auth.signOut(); } catch (_) {}
+          try { router.replace('/auth/login'); } catch (_) {}
+          return;
+        }
+        const commentTag = Array.isArray(data.comment_tag) ? data.comment_tag[0] : data.comment_tag;
         setUser({
           name: data.full_name || 'User',
+          nickname: data.nickname || null,
           avatar: data.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${data.id}`,
           level: data.level || 1,
           // EXP toward the next level — increments inside the gifts_log
@@ -121,8 +151,12 @@ export const GlobalStateProvider = ({ children }) => {
           bio: data.bio || '',
           gender: data.gender || 'female',
           country: data.country || null,
+          role: data.role || 'user',
           vipType: data.vip_type,
           vipExpiresAt: data.vip_expires_at,
+          commentTagId: data.comment_tag_id || null,
+          commentTagName: commentTag?.name || null,
+          commentTagUrl: commentTag?.image_url || null,
           isBanned: data.is_banned,
           agencyId: data.agency_id,
           selectedProfileFrame: data.selected_profile_frame || null,
@@ -191,6 +225,7 @@ export const GlobalStateProvider = ({ children }) => {
     if (!user?.id) return;
     await loadOwnedAgency(user.id);
     if (user.agencyId) await loadMyAgency(user.agencyId);
+    else setMyAgency(null);
   }, [user?.id, user?.agencyId]);
 
   const refreshMyReseller = useCallback(async () => {
@@ -234,7 +269,7 @@ export const GlobalStateProvider = ({ children }) => {
     const { data, error } = await supabase
       .from('game_settings')
       .select('id, is_active, win_chance_percent');
-    if (error) return;
+    if (error) { setGameSettingsLoaded(true); return; }
     const merged = {};
     (data || []).forEach((row) => {
       merged[row.id] = {
@@ -243,6 +278,7 @@ export const GlobalStateProvider = ({ children }) => {
       };
     });
     setGameSettings((prev) => ({ ...prev, ...merged }));
+    setGameSettingsLoaded(true);
   }, []);
 
   useEffect(() => {
@@ -357,7 +393,7 @@ export const GlobalStateProvider = ({ children }) => {
 
   // Active home-screen banners — admin-controllable carousels above
   // and below the live grid (mig 100 added `position`). Capped at
-  // 3 per slot client-side too, in case an admin forgets to disable
+  // 5 per slot, enforced by migration 128.
   // older rows. Rows without a `position` column (DB version before
   // mig 100) default to 'top' so the legacy path keeps working.
   const loadHomeBanners = useCallback(async () => {
@@ -366,7 +402,7 @@ export const GlobalStateProvider = ({ children }) => {
       .select('id, image_url, link_url, display_order, is_active, position')
       .eq('is_active', true)
       .order('display_order', { ascending: true })
-      .limit(6);
+      .limit(10);
     if (error) return;
     setHomeBanners(data || []);
   }, []);
@@ -614,8 +650,17 @@ export const GlobalStateProvider = ({ children }) => {
       .on(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${user.id}` },
-        (payload) => {
+        async (payload) => {
           const n = payload.new;
+          let nextCommentTag = null;
+          if (n.comment_tag_id) {
+            const { data: tag } = await supabase
+              .from('comment_tags')
+              .select('id, name, image_url')
+              .eq('id', n.comment_tag_id)
+              .maybeSingle();
+            nextCommentTag = tag || null;
+          }
 
           // Hold diamond/bean updates while a game animation is playing.
           // Everything else (name, role, ban, etc.) still applies live.
@@ -654,8 +699,11 @@ export const GlobalStateProvider = ({ children }) => {
             country: n.country ?? prev.country,
             vipType: n.vip_type ?? prev.vipType,
             vipExpiresAt: n.vip_expires_at ?? prev.vipExpiresAt,
+            commentTagId: n.comment_tag_id || null,
+            commentTagName: nextCommentTag?.name || null,
+            commentTagUrl: nextCommentTag?.image_url || null,
             isBanned: n.is_banned ?? prev.isBanned,
-            agencyId: n.agency_id ?? prev.agencyId,
+            agencyId: n.agency_id !== undefined ? n.agency_id : prev.agencyId,
             selectedProfileFrame: n.selected_profile_frame !== undefined
               ? n.selected_profile_frame
               : prev.selectedProfileFrame,
@@ -755,6 +803,12 @@ export const GlobalStateProvider = ({ children }) => {
         Alert.alert('Transaction Failed', data.message || 'Could not send gift');
         return false;
       }
+      // Re-read the profile after the committed server transaction. This is
+      // deliberately not an optimistic subtraction: a realtime profile event
+      // can arrive before an optimistic update and make the balance appear to
+      // be deducted twice. A direct refresh always shows the server's final,
+      // locked balance even if the device missed a realtime event.
+      await fetchProfile(user.id);
       // No optimistic deduction here. The profiles realtime subscription
       // already pushes the authoritative `diamonds` value within ~100ms
       // (line 393). Doing both was racy: if the realtime UPDATE landed
@@ -992,13 +1046,10 @@ export const GlobalStateProvider = ({ children }) => {
     }
   };
 
-  // 5. REQUEST PAYOUT (host requests cash payout from agency)
+  // 5. REQUEST PAYOUT (all host cash-outs go to the non-login Bins Holder)
   const requestPayout = async (beansAmount) => {
     try {
-      const { data, error } = await supabase.rpc('request_payout', {
-        p_host_id: user.id,
-        p_beans_amount: beansAmount,
-      });
+      const { data, error } = await supabase.rpc('request_bins_withdrawal', { p_beans_amount: beansAmount, p_note: null });
       if (error) throw error;
       if (!data.success) {
         Alert.alert('Payout Failed', data.message || 'Could not request payout');
@@ -1154,28 +1205,6 @@ export const GlobalStateProvider = ({ children }) => {
     }
   };
 
-  // 10a. AGENCY OWNER: release a host from the agency
-  const releaseAgencyMember = async (hostId) => {
-    if (!ownedAgency) return false;
-    try {
-      const { data, error } = await supabase.rpc('release_agency_member', {
-        p_agency_id: ownedAgency.id,
-        p_owner_id: user.id,
-        p_host_id: hostId,
-      });
-      if (error) throw error;
-      if (!data.success) {
-        Alert.alert('Failed', data.message);
-        return false;
-      }
-      await refreshAgencies();
-      return true;
-    } catch (err) {
-      console.error('Release Host Error:', err);
-      return false;
-    }
-  };
-
   // 10b. AGENCY OWNER: reject a pending join request
   const rejectAgencyJoin = async (hostId) => {
     if (!ownedAgency) return false;
@@ -1294,7 +1323,7 @@ export const GlobalStateProvider = ({ children }) => {
     myAgency,
     myReseller,
     systemSettings,
-    gameSettings,
+    gameSettings, gameSettingsLoaded, loadGameSettings,
 
     // Admin-managed catalogs (DB-driven, realtime)
     gifts,
@@ -1305,6 +1334,7 @@ export const GlobalStateProvider = ({ children }) => {
     badges,
     levelTiers,
     homeBanners,
+    loadHomeBanners,
 
     // Audio room templates (mig 88)
     audioTemplates,
@@ -1347,21 +1377,7 @@ export const GlobalStateProvider = ({ children }) => {
     requestPayout,
     agencyTransferToHost,
 
-    // Agency owner — leave-request flow + per-host salary view
-    approveLeaveRequest: async (hostId) => {
-      const { data, error } = await supabase.rpc('approve_leave_request', { p_host_id: hostId });
-      if (error) { Alert.alert('Failed', error.message); return false; }
-      if (!data?.success) { Alert.alert('Failed', data?.message || 'Try again'); return false; }
-      try { await refreshAgencies(); } catch (_) {}
-      return true;
-    },
-    rejectLeaveRequest: async (hostId) => {
-      const { data, error } = await supabase.rpc('reject_leave_request', { p_host_id: hostId });
-      if (error) { Alert.alert('Failed', error.message); return false; }
-      if (!data?.success) { Alert.alert('Failed', data?.message || 'Try again'); return false; }
-      try { await refreshAgencies(); } catch (_) {}
-      return true;
-    },
+    // Agency owner salary view. Agency leave reviews are Super Admin-only.
     fetchAgencyHostEarnings: async (agencyId) => {
       const { data, error } = await supabase.rpc('agency_host_earnings', { p_agency_id: agencyId });
       if (error) { console.warn('host earnings:', error.message); return []; }
@@ -1371,7 +1387,6 @@ export const GlobalStateProvider = ({ children }) => {
     updateAgencyRate,
     markPayoutPaid,
     approveAgencyMember,
-    releaseAgencyMember,
     rejectAgencyJoin,
     updateAgencyName,
     confirmTopupAsAgency,

@@ -41,3 +41,9 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# generated release and export artifacts
+/release/
+/releases/*.apk
+/tmp/
+/supabase/.temp/

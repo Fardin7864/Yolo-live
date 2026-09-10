@@ -21,7 +21,7 @@ export default function AgencyScreen() {
         <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
           <Ionicons name="chevron-back" size={28} color="#FFFFFF" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>{isOwner ? 'Agency Dashboard' : 'Agency Center'}</Text>
+        <Text style={styles.headerTitle}>{isOwner ? 'Agency Dashboard' : 'Agencies'}</Text>
         <View style={{ width: 28 }} />
       </View>
 

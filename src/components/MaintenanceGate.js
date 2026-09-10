@@ -29,7 +29,7 @@ export default function MaintenanceGate({ children }) {
 
   if (!systemSettings.maintenance_mode || canBypassMaintenance) return children;
 
-  const platform = systemSettings.platform_name || 'Care Live';
+  const platform = systemSettings.platform_name || 'Popular Live';
   const message = systemSettings.maintenance_message ||
     "We'll be right back. Maintenance in progress.";
 

@@ -17,7 +17,7 @@ import LogoLoader from '../../../src/components/LogoLoader';
 import { useGlobalState } from '../../../src/context/GlobalStateContext';
 import { supabase } from '../../../src/api/supabase';
 import { flagFor } from '../../../src/utils/countryFlag';
-import SvipNameTag from '../../../src/components/SvipNameTag';
+import ProfileIdentityBadges from '../../../src/components/ProfileIdentityBadges';
 
 const PROFILE_ASSETS = {
   background: require('../../../assets/public-profile/cosmic-background.webp'),
@@ -176,11 +176,8 @@ export default function PublicProfileScreen() {
 
             <View style={styles.nameRow}>
               <Text style={styles.userName}>♠ {profile.full_name || 'User'} ♠</Text>
-              <SvipNameTag vipType={profile.vip_type} />
-              <LinearGradient colors={['#ffd95b', '#ffb817']} style={styles.levelBadge}>
-                <Text style={styles.levelText}>Lv. {profile.level || 1}</Text>
-              </LinearGradient>
             </View>
+            <ProfileIdentityBadges vipType={profile.vip_type} level={profile.level} nickname={profile.nickname} centered />
             <LinearGradient colors={['transparent', '#b739ff', '#56a4ff', 'transparent']} style={styles.divider} />
             <View style={styles.idRow}>
               <Text style={styles.meta}>ID: {profile.display_id || '—'}</Text>
@@ -286,6 +283,8 @@ const styles = StyleSheet.create({
   avatar: { width: '100%', height: '100%', borderRadius: 88, backgroundColor: '#12052e' },
   nameRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 20, gap: 10 },
   userName: { color: '#fff', fontSize: 27, fontWeight: '900', textShadowColor: 'rgba(91,51,255,.8)', textShadowRadius: 9 },
+  nicknameBadge: { marginTop: 7, paddingHorizontal: 13, paddingVertical: 4, borderRadius: 12, borderWidth: 1, borderColor: '#8B5CF6', backgroundColor: 'rgba(76,29,149,.5)' },
+  nicknameBadgeText: { color: '#E9D5FF', fontSize: 12, fontWeight: '900' },
   levelBadge: { borderRadius: 15, paddingVertical: 6, paddingHorizontal: 13, shadowColor: '#ffbf27', shadowOpacity: .55, shadowRadius: 8 },
   levelText: { color: '#251200', fontWeight: '900', fontSize: 13 },
   divider: { width: '58%', height: 2, marginTop: 13, marginBottom: 13 },

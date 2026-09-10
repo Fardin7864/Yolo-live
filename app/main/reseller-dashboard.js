@@ -435,6 +435,7 @@ export default function ResellerDashboardScreen() {
                     <Text style={styles.histMeta}>
                       {req.package_amount.toLocaleString()} 💎 • ৳{Number(req.bdt_value).toLocaleString()}
                     </Text>
+                    <Text style={styles.histDate}>User ID: {req.profiles?.display_id || '—'} • Request ID: {req.id}</Text>
                     <Text style={styles.histDate}>{new Date(req.created_at).toLocaleString()}</Text>
                     {req.notes && req.notes !== 'Direct send (off-app payment)' && (
                       <Text style={styles.histNote} numberOfLines={1}>"{req.notes}"</Text>

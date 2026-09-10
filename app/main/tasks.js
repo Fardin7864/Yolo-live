@@ -7,6 +7,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useGlobalState } from '../../src/context/GlobalStateContext';
 import { showCuteAlert } from '../../src/components/CuteAlert';
 import { horizontalScale } from '../../src/theme/scaling';
+import { isTaskCenterRewardEligible } from '../../src/rewards/rewardPolicy';
 
 /**
  * Task Center — fully wired to the migration 70 backend.
@@ -86,9 +87,12 @@ export default function TasksScreen() {
   // Visible missions: viewer rows for everyone; host rows only for hosts.
   const visibleMissions = useMemo(() => {
     const all = Array.isArray(dbTasks) ? dbTasks : [];
-    const viewerOnly = all.filter((t) => t.audience !== 'host');
+    // The daily video reward is automatic and server-authoritative. Legacy
+    // host-live/audio rows must never expose a second claim path.
+    const eligible = all.filter(isTaskCenterRewardEligible);
+    const viewerOnly = eligible.filter((t) => t.audience !== 'host');
     if (!isHost) return viewerOnly;
-    return [...viewerOnly, ...all.filter((t) => t.audience === 'host')];
+    return [...viewerOnly, ...eligible.filter((t) => t.audience === 'host')];
   }, [isHost, dbTasks]);
 
   const handleClaimDaily = async () => {
@@ -190,6 +194,18 @@ export default function TasksScreen() {
           Daily Missions {isHost ? '(Host)' : ''}
         </Text>
 
+        {isHost && (
+          <View style={styles.videoRewardPolicyCard}>
+            <Ionicons name="videocam" size={22} color="#38BDF8" />
+            <View style={styles.videoRewardPolicyCopy}>
+              <Text style={styles.videoRewardPolicyTitle}>Daily Video Live Reward</Text>
+              <Text style={styles.videoRewardPolicyText}>
+                Automatically credited once per Dhaka day after 60 uninterrupted minutes of video live. Audio live earns no time reward.
+              </Text>
+            </View>
+          </View>
+        )}
+
         {visibleMissions.length === 0 && (
           <Text style={styles.mutedNote}>No missions live right now. Check back soon.</Text>
         )}
@@ -263,7 +279,7 @@ export default function TasksScreen() {
         })}
 
         <Text style={styles.footerNote}>
-          Missions reset every day at midnight UTC. Progress auto-tracks for live, gift and watch actions; share completes when you tap the share button on a stream.
+          Missions reset every day at midnight Bangladesh time. Gift and watch progress auto-track; share completes when you tap the share button on a stream. Audio live has no daily or task reward.
         </Text>
       </ScrollView>
     </SafeAreaView>
@@ -292,6 +308,10 @@ const styles = StyleSheet.create({
 
   sectionTitle: { color: '#FFFFFF', fontSize: 18, fontWeight: 'bold', marginBottom: 16 },
   mutedNote: { color: '#6B7280', fontSize: 12, fontStyle: 'italic', marginBottom: 12 },
+  videoRewardPolicyCard: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: 'rgba(56, 189, 248, 0.10)', borderWidth: 1, borderColor: 'rgba(56, 189, 248, 0.35)', borderRadius: 12, padding: 14, marginBottom: 14 },
+  videoRewardPolicyCopy: { flex: 1, marginLeft: 10 },
+  videoRewardPolicyTitle: { color: '#FFFFFF', fontSize: 14, fontWeight: '700', marginBottom: 4 },
+  videoRewardPolicyText: { color: '#BAE6FD', fontSize: 12, lineHeight: 17 },
 
   missionCard: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#1E1A34', padding: 16, borderRadius: 12, marginBottom: 12 },
   missionInfo: { flex: 1, marginRight: 12 },

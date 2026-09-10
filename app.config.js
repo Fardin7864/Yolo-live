@@ -20,7 +20,7 @@ module.exports = () => ({
   expo: {
     name:                TENANT_CONFIG.appName,
     slug:                TENANT_CONFIG.slug,
-    version:             '1.0.0',
+    version:             '1.1.39',
     orientation:         'portrait',
     icon:                './assets/app-icon.png',
     userInterfaceStyle:  'dark',
@@ -40,15 +40,16 @@ module.exports = () => ({
         backgroundColor: '#FFFFFF',
       },
       edgeToEdgeEnabled: true,
-      googleServicesFile: './android/app/google-services.json',
       permissions: [
         'CAMERA',
         'RECORD_AUDIO',
+        'ACCESS_COARSE_LOCATION',
+        'ACCESS_FINE_LOCATION',
         'READ_MEDIA_IMAGES',
         'READ_MEDIA_VIDEO',
         'READ_MEDIA_AUDIO',
         'READ_MEDIA_VISUAL_USER_SELECTED',
-        'POST_NOTIFICATIONS',
+        'REQUEST_INSTALL_PACKAGES',
       ],
       package: TENANT_CONFIG.bundleId,
     },
@@ -56,12 +57,19 @@ module.exports = () => ({
       favicon: './assets/app-icon.png',
     },
     plugins: [
-      '@react-native-firebase/app',
-      '@react-native-firebase/analytics',
-      '@react-native-firebase/crashlytics',
-      '@react-native-firebase/messaging',
       'expo-router',
       'expo-video',
+      [
+        'expo-location',
+        {
+          locationWhenInUsePermission: fill(
+            TENANT_CONFIG.permissions.locationReason
+              || 'Allow %appName% to use your location for regional features',
+          ),
+          isAndroidBackgroundLocationEnabled: false,
+          isAndroidForegroundServiceEnabled: false,
+        },
+      ],
       [
         'expo-camera',
         {
@@ -76,6 +84,7 @@ module.exports = () => ({
           photosPermission:      fill(TENANT_CONFIG.permissions.photosReason),
           savePhotosPermission:  fill(TENANT_CONFIG.permissions.savePhotosReason),
           isSelfHosted:          true,
+          granularPermissions:  ['photo', 'video', 'audio'],
         },
       ],
     ],
@@ -98,6 +107,7 @@ module.exports = () => ({
       policy: 'appVersion',
     },
     updates: {
+      enabled: false,
       url: TENANT_CONFIG.eas.updateUrl,
     },
   },

@@ -22,9 +22,12 @@ export default function AgencyHostView() {
   const [agencyCodeInput, setAgencyCodeInput] = useState('');
   const [topAgencies, setTopAgencies] = useState([]);
   const [myPayouts, setMyPayouts] = useState([]);
-  const [bindingStatus, setBindingStatus] = useState(null); // 'active' | 'pending' | null
+  const [bindingStatus, setBindingStatus] = useState(null); // 'active' | null
+  const [joinRequest, setJoinRequest] = useState(null);
+  const [leaveRequest, setLeaveRequest] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [searchingAgency, setSearchingAgency] = useState(false);
 
   const loadData = useCallback(async () => {
     if (!user?.id) return;
@@ -35,18 +38,36 @@ export default function AgencyHostView() {
       .from('agency_members')
       .select('status, agency_id')
       .eq('host_id', user.id)
-      .in('status', ['active', 'pending'])
+      .eq('status', 'active')
       .order('joined_at', { ascending: false })
       .limit(1)
       .maybeSingle();
 
     setBindingStatus(memberData?.status || null);
 
+    const { data: requestData } = await supabase
+      .from('agency_join_requests')
+      .select('id, status, review_note, created_at, agency_id, agencies:agency_id(name)')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    setJoinRequest(requestData || null);
+
+    const { data: leaveRequestData } = await supabase
+      .from('agency_leave_requests')
+      .select('id,status,penalty_amount,requested_at,review_note')
+      .eq('host_id', user.id)
+      .order('requested_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    setLeaveRequest(leaveRequestData || null);
+
     // 2. If not bound, show top agencies to join
     if (!memberData) {
       const { data: agencies } = await supabase
         .from('agencies')
-        .select('id, name, code, member_count, status')
+        .select('id, name, code, member_count, status, owner_id, owner:profiles!agencies_owner_id_fkey(full_name, avatar_url)')
         .eq('status', 'verified')
         .order('member_count', { ascending: false })
         .limit(20);
@@ -55,9 +76,9 @@ export default function AgencyHostView() {
 
     // 3. Get payout history
     const { data: payouts } = await supabase
-      .from('agency_payouts')
-      .select('*, agencies:agency_id(name)')
-      .eq('host_id', user.id)
+      .from('bins_withdrawal_requests')
+      .select('*, holder:holder_id(display_id,name)')
+      .eq('requester_id', user.id)
       .order('created_at', { ascending: false })
       .limit(20);
     setMyPayouts(payouts || []);
@@ -77,11 +98,30 @@ export default function AgencyHostView() {
   // -------- Handlers --------
   const handleJoinWithCode = async () => {
     const code = agencyCodeInput.trim().toUpperCase();
-    if (!code) return;
-    const ok = await bindToAgency(code);
-    if (ok) {
+    if (!code || searchingAgency) return;
+    setSearchingAgency(true);
+    const { data: matches, error: searchError } = await supabase.rpc('search_agencies_by_code', {
+      p_code: code,
+      p_limit: 1,
+    });
+    const agency = Array.isArray(matches) ? matches[0] : null;
+    if (searchError) {
+      setSearchingAgency(false);
+      Alert.alert('Search failed', searchError.message || 'Please try again.');
+      return;
+    }
+    if (!agency) {
+      setSearchingAgency(false);
+      Alert.alert('Agency not found', 'Check the agency code and try again.');
+      return;
+    }
+    const { data, error } = await supabase.rpc('submit_agency_join_request', { p_agency_id: agency.agency_id, p_note: null });
+    setSearchingAgency(false);
+    if (!error && data?.success) {
       setAgencyCodeInput('');
       await loadData();
+    } else {
+      Alert.alert('Could not apply', data?.message || error?.message || 'Please try again.');
     }
   };
 
@@ -91,15 +131,20 @@ export default function AgencyHostView() {
       {
         text: 'Send Request',
         onPress: async () => {
-          const ok = await bindToAgency(agency.code);
-          if (ok) await loadData();
+          const { data, error } = await supabase.rpc('submit_agency_join_request', {
+            p_agency_id: agency.id,
+            p_note: null,
+          });
+          if (error || !data?.success) Alert.alert('Could not apply', data?.message || error?.message || 'Please try again.');
+          else await loadData();
         },
       },
     ]);
   };
 
   const handleLeave = () => {
-    Alert.alert('Leave Agency', 'Are you sure you want to leave this agency? Your binding will be released.', [
+    if (leaveRequest?.status === 'pending') return;
+    Alert.alert('Request Agency Leave', 'An admin or your agency owner must approve this request. You will remain in the agency and no diamonds will be deducted while it is pending.', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Leave',
@@ -116,7 +161,7 @@ export default function AgencyHostView() {
           }
           await refreshAgencies();
           await loadData();
-          Alert.alert('Left', 'You have been released from your agency.');
+          Alert.alert('Requested', 'Your membership remains active while the request waits for admin or agency approval. The 50,000 diamond penalty is charged only after approval.');
         },
       },
     ]);
@@ -132,7 +177,7 @@ export default function AgencyHostView() {
   }
 
   // PENDING approval state
-  if (bindingStatus === 'pending') {
+  if (joinRequest?.status === 'pending' && bindingStatus !== 'active') {
     return (
       <ScrollView
         contentContainerStyle={{ padding: 20 }}
@@ -142,9 +187,13 @@ export default function AgencyHostView() {
           <Ionicons name="hourglass" size={48} color="#FCD34D" />
           <Text style={hostStyles.pendingTitle}>Awaiting Approval</Text>
           <Text style={hostStyles.pendingSub}>
-            Your request to join {myAgency?.name || 'the agency'} is pending owner approval. You will be notified once approved.
+            Your request to join {joinRequest?.agencies?.name || 'the agency'} is waiting for dashboard admin approval. Live broadcasting unlocks after approval.
           </Text>
-          <TouchableOpacity style={hostStyles.cancelBtn} onPress={handleLeave}>
+          <TouchableOpacity style={hostStyles.cancelBtn} onPress={async () => {
+            const { data, error } = await supabase.rpc('cancel_agency_join_request', { p_request_id: joinRequest.id });
+            if (error || !data?.success) Alert.alert('Could not cancel', data?.message || error?.message);
+            else await loadData();
+          }}>
             <Text style={{ color: '#F43F5E' }}>Cancel Request</Text>
           </TouchableOpacity>
         </View>
@@ -182,6 +231,9 @@ export default function AgencyHostView() {
               <Ionicons name="shield-checkmark" size={48} color="#FCD34D" />
               <Text style={hostStyles.soloTitle}>Join an Agency</Text>
               <Text style={hostStyles.soloSub}>Get better cash rates and dedicated support from agency owners.</Text>
+              {joinRequest?.status === 'rejected' ? (
+                <Text style={[hostStyles.soloSub, { color: '#FB7185', marginTop: 8 }]}>Last application was not approved{joinRequest.review_note ? `: ${joinRequest.review_note}` : '.'}</Text>
+              ) : null}
             </View>
 
             <View style={hostStyles.formSection}>
@@ -193,8 +245,8 @@ export default function AgencyHostView() {
                 onChangeText={setAgencyCodeInput}
                 autoCapitalize="characters"
               />
-              <TouchableOpacity style={hostStyles.joinBtn} onPress={handleJoinWithCode}>
-                <Text style={{ color: '#000', fontWeight: 'bold' }}>Join</Text>
+              <TouchableOpacity style={[hostStyles.joinBtn, searchingAgency && { opacity: 0.55 }]} onPress={handleJoinWithCode} disabled={searchingAgency}>
+                <Text style={{ color: '#000', fontWeight: 'bold' }}>{searchingAgency ? 'Finding…' : 'Join'}</Text>
               </TouchableOpacity>
             </View>
 
@@ -210,9 +262,14 @@ export default function AgencyHostView() {
                       Code: {agency.code} • {agency.member_count || 0} hosts
                     </Text>
                   </View>
-                  <TouchableOpacity onPress={() => handleJoinAgency(agency)}>
-                    <Text style={{ color: '#38BDF8', fontWeight: 'bold' }}>Request</Text>
-                  </TouchableOpacity>
+                  <View style={{ flexDirection: 'row', gap: 12, alignItems: 'center' }}>
+                    <TouchableOpacity onPress={() => router.push(`/main/chat/${agency.owner_id}?name=${encodeURIComponent(agency.owner?.full_name || agency.name)}`)}>
+                      <Text style={{ color: '#C084FC', fontWeight: 'bold' }}>Message</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => handleJoinAgency(agency)}>
+                      <Text style={{ color: '#38BDF8', fontWeight: 'bold' }}>Apply</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
               ))
             )}
@@ -236,8 +293,10 @@ export default function AgencyHostView() {
             Rate: ৳{myAgency.payout_rate} per 100k beans
           </Text>
         </View>
-        <TouchableOpacity onPress={handleLeave}>
-          <Text style={{ color: '#F43F5E', fontWeight: 'bold' }}>Leave</Text>
+        <TouchableOpacity onPress={handleLeave} disabled={leaveRequest?.status === 'pending'}>
+          <Text style={{ color: leaveRequest?.status === 'pending' ? '#FCD34D' : '#F43F5E', fontWeight: 'bold' }}>
+            {leaveRequest?.status === 'pending' ? 'Leave Pending' : 'Request Leave'}
+          </Text>
         </TouchableOpacity>
       </View>
 

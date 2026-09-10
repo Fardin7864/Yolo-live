@@ -9,8 +9,12 @@ import { useGlobalState } from '../../src/context/GlobalStateContext';
 import LogoLoader from '../../src/components/LogoLoader';
 import { supabase } from '../../src/api/supabase';
 import { BRAND } from '../../src/theme/brand';
+import {
+  buildLiveAnnouncementDestination,
+  canOpenLuckyBagForUser,
+} from '../../src/api/liveAnnouncements';
 
-const ACTIVITY_TYPES = ['gift_received', 'follow', 'topup_confirmed', 'agency_invite', 'agency_release', 'payout_paid'];
+const ACTIVITY_TYPES = ['gift_received', 'follow', 'topup_confirmed', 'agency_invite', 'agency_join_request', 'agency_release', 'payout_paid'];
 
 const FILTER_LABEL = {
   system:   { label: 'System',     icon: 'megaphone' },
@@ -23,6 +27,7 @@ const TYPE_VISUAL = {
   follow:          { icon: 'person-add',          color: '#FCD34D' },
   topup_confirmed: { icon: 'wallet',              color: '#34D399' },
   agency_invite:   { icon: 'shield-checkmark',    color: '#6B4EFF' },
+  agency_join_request: { icon: 'person-add',       color: '#34D399' },
   agency_release:  { icon: 'exit',                color: '#F43F5E' },
   payout_paid:     { icon: 'cash',                color: '#34D399' },
   system:          { icon: 'information-circle',  color: '#6B4EFF' },
@@ -110,8 +115,18 @@ export default function NotificationsScreen() {
 
   const renderItem = ({ item }) => {
     const visual = TYPE_VISUAL[item.type] || TYPE_VISUAL.system;
+    const isLuckyBag = item.type === 'lucky_bag' || item.type === 'lucky_bag_drop';
+    const destination = isLuckyBag ? buildLiveAnnouncementDestination(item.payload) : null;
     return (
-      <View style={[styles.notificationItem, !item.is_read && styles.unread]}>
+      <TouchableOpacity
+        activeOpacity={destination ? 0.75 : 1}
+        disabled={!destination}
+        onPress={async () => {
+          if (!destination || !(await canOpenLuckyBagForUser(user?.id))) return;
+          router.push(destination);
+        }}
+        style={[styles.notificationItem, !item.is_read && styles.unread]}
+      >
         <View style={[styles.iconContainer, { backgroundColor: visual.color + '20' }]}>
           <Ionicons name={visual.icon} size={24} color={visual.color} />
         </View>
@@ -120,7 +135,7 @@ export default function NotificationsScreen() {
           {item.body ? <Text style={styles.desc}>{item.body}</Text> : null}
         </View>
         <Text style={styles.time}>{relativeTime(item.created_at)}</Text>
-      </View>
+      </TouchableOpacity>
     );
   };
 

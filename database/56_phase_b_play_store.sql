@@ -26,9 +26,9 @@
 -- ---------------------------------------------------------------------
 INSERT INTO public.system_settings (key, value)
 VALUES
-  ('min_supported_app_version', '"1.0.0"'::jsonb),
-  ('latest_app_version',        '"1.0.0"'::jsonb),
-  ('store_url_android',         '"https://play.google.com/store/apps/details?id=com.yoloteam.Yololive"'::jsonb),
+  ('min_supported_app_version', '"1.0.1"'::jsonb),
+  ('latest_app_version',        '"1.0.1"'::jsonb),
+  ('store_url_android',         '"https://play.google.com/store/apps/details?id=com.carelive.app"'::jsonb),
   ('store_url_ios',             '""'::jsonb)
 ON CONFLICT (key) DO NOTHING;
 

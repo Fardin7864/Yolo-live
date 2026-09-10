@@ -10,6 +10,7 @@ import { useGlobalState } from '../../src/context/GlobalStateContext';
 import LogoLoader from '../../src/components/LogoLoader';
 import { supabase } from '../../src/api/supabase';
 import { useResponsive } from '../../src/hooks/useResponsive';
+import { useRouter } from 'expo-router';
 
 /* ================================================================
    AGENCY OWNER DASHBOARD — Premium Redesign
@@ -19,13 +20,13 @@ import { useResponsive } from '../../src/hooks/useResponsive';
    ================================================================ */
 
 export default function AgencyOwnerView() {
+  const router = useRouter();
   const {
     ownedAgency,
     agencyConvertBeans, agencyTransferToHost,
-    updateAgencyRate, approveAgencyMember, markPayoutPaid, refreshAgencies,
+    updateAgencyRate, markPayoutPaid, refreshAgencies,
     requestAgencyStock, confirmTopupAsAgency,
-    releaseAgencyMember, rejectAgencyJoin, updateAgencyName,
-    approveLeaveRequest, rejectLeaveRequest, fetchAgencyHostEarnings,
+    updateAgencyName, fetchAgencyHostEarnings,
     systemSettings,
   } = useGlobalState();
 
@@ -36,7 +37,9 @@ export default function AgencyOwnerView() {
 
   const [hosts, setHosts] = useState([]);
   const [pendingRequests, setPendingRequests] = useState([]);
-  const [leavePending, setLeavePending] = useState([]);
+  const [leaveRequests, setLeaveRequests] = useState([]);
+  const [reviewingRequestId, setReviewingRequestId] = useState(null);
+  const [reviewingLeaveRequestId, setReviewingLeaveRequestId] = useState(null);
   const [hostEarnings, setHostEarnings] = useState([]);
   // O(1) host-id → earnings lookup. The host card render used to do
   // `hostEarnings.find(...)` for every card; with 100+ hosts and many
@@ -52,6 +55,10 @@ export default function AgencyOwnerView() {
   const [stockRequests, setStockRequests] = useState([]);
   const [loadingData, setLoadingData] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [reportRows, setReportRows] = useState([]);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportStart, setReportStart] = useState(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`; });
+  const [reportEnd, setReportEnd] = useState(() => new Date().toISOString().slice(0, 10));
 
   const [showTransferModal, setShowTransferModal] = useState(false);
   const [selectedHost, setSelectedHost] = useState(null);
@@ -123,8 +130,16 @@ export default function AgencyOwnerView() {
     setLoadingData(true);
     const [hostsRes, pendingRes, leaveRes, payoutsRes, topupsRes, stockRes, earningsRes] = await Promise.all([
       supabase.from('agency_members').select('host_id, joined_at, profiles:host_id(id, full_name, avatar_url, display_id, beans, last_seen_at)').eq('agency_id', ownedAgency.id).eq('status', 'active'),
-      supabase.from('agency_members').select('host_id, joined_at, profiles:host_id(id, full_name, avatar_url, display_id)').eq('agency_id', ownedAgency.id).eq('status', 'pending'),
-      supabase.from('agency_members').select('host_id, joined_at, profiles:host_id(id, full_name, avatar_url, display_id, beans)').eq('agency_id', ownedAgency.id).eq('status', 'leave_pending'),
+      supabase.from('agency_join_requests')
+        .select('id,user_id,agency_id,status,applicant_note,created_at,user:profiles!agency_join_requests_user_id_fkey(id,full_name,avatar_url,display_id)')
+        .eq('agency_id', ownedAgency.id)
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false }),
+      supabase.from('agency_leave_requests')
+        .select('id,host_id,agency_id,status,penalty_amount,requested_at,host:profiles!agency_leave_requests_host_id_fkey(id,full_name,avatar_url,display_id,diamonds)')
+        .eq('agency_id', ownedAgency.id)
+        .eq('status', 'pending')
+        .order('requested_at', { ascending: false }),
       supabase.from('agency_payouts').select('*, profiles:host_id(full_name, display_id)').eq('agency_id', ownedAgency.id).order('created_at', { ascending: false }).limit(50),
       supabase.from('topup_requests').select('*, user:profiles!topup_requests_user_id_fkey(full_name, display_id, phone_number)').eq('agency_id', ownedAgency.id).order('created_at', { ascending: false }).limit(50),
       supabase.from('agency_stock_requests').select('*').eq('agency_id', ownedAgency.id).order('created_at', { ascending: false }).limit(20),
@@ -132,7 +147,7 @@ export default function AgencyOwnerView() {
     ]);
     if (hostsRes.data) setHosts(hostsRes.data);
     if (pendingRes.data) setPendingRequests(pendingRes.data);
-    if (leaveRes.data) setLeavePending(leaveRes.data);
+    if (leaveRes.data) setLeaveRequests(leaveRes.data);
     if (payoutsRes.data) setPayouts(payoutsRes.data);
     if (topupsRes.data) setTopupRequests(topupsRes.data);
     if (stockRes.data) setStockRequests(stockRes.data);
@@ -149,6 +164,8 @@ export default function AgencyOwnerView() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'topup_requests', filter: `agency_id=eq.${ownedAgency.id}` }, () => loadAll())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'agency_stock_requests', filter: `agency_id=eq.${ownedAgency.id}` }, () => loadAll())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'agency_members', filter: `agency_id=eq.${ownedAgency.id}` }, () => loadAll())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'agency_join_requests', filter: `agency_id=eq.${ownedAgency.id}` }, () => loadAll())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'agency_leave_requests', filter: `agency_id=eq.${ownedAgency.id}` }, () => loadAll())
       .subscribe();
     return () => { supabase.removeChannel(ch); };
   }, [ownedAgency?.id, loadAll]);
@@ -161,8 +178,35 @@ export default function AgencyOwnerView() {
     setRefreshing(true);
     await refreshAgencies();
     await loadAll();
+    if (ownerSubTab === 'reports') await loadHostReport();
     setRefreshing(false);
   };
+
+  const loadHostReport = async (start = reportStart, end = reportEnd) => {
+    if (!ownedAgency?.id || !start || !end) return;
+    setReportLoading(true);
+    const endExclusive = new Date(`${end}T00:00:00+06:00`);
+    endExclusive.setDate(endExclusive.getDate() + 1);
+    const { data, error } = await supabase.rpc('agency_host_period_report', {
+      p_agency_id: ownedAgency.id,
+      p_start: new Date(`${start}T00:00:00+06:00`).toISOString(),
+      p_end: endExclusive.toISOString(),
+    });
+    if (error) Alert.alert('Report failed', error.message);
+    setReportRows(data || []);
+    setReportLoading(false);
+  };
+
+  const useReportPreset = (previous = false) => {
+    const now = new Date();
+    const first = new Date(now.getFullYear(), now.getMonth() - (previous ? 1 : 0), 1);
+    const last = previous ? new Date(now.getFullYear(), now.getMonth(), 0) : now;
+    const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const start = fmt(first); const end = fmt(last);
+    setReportStart(start); setReportEnd(end); loadHostReport(start, end);
+  };
+
+  useEffect(() => { if (ownerSubTab === 'reports') loadHostReport(); }, [ownerSubTab, ownedAgency?.id]);
 
   const handleConvertBeans = () => {
     if (!ownedAgency || ownedAgency.accumulated_beans < 100000) {
@@ -193,37 +237,67 @@ export default function AgencyOwnerView() {
     }
   };
 
-  const handleApprove = async (hostId) => {
-    const ok = await approveAgencyMember(hostId);
-    if (ok) { Alert.alert('Approved', 'Host added to your agency.'); await loadAll(); }
+  const reviewJoinRequest = async (request, approve) => {
+    setReviewingRequestId(request.id);
+    const { data, error } = await supabase.rpc('owner_review_agency_request', {
+      p_request_id: request.id,
+      p_approve: approve,
+      p_review_note: null,
+    });
+    setReviewingRequestId(null);
+    if (error || !data?.success) {
+      Alert.alert('Request failed', data?.message || error?.message || 'Please try again.');
+      return;
+    }
+    Alert.alert(approve ? 'Accepted' : 'Rejected', approve
+      ? `${request.user?.full_name || 'The user'} is now a host in your agency.`
+      : 'The agency request was rejected.');
+    await refreshAgencies?.();
+    await loadAll();
   };
 
-  const handleReject = async (hostId, hostName) => {
-    Alert.alert('Reject join request?', `${hostName || 'This host'} will be rejected.`, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Reject', style: 'destructive', onPress: async () => { const ok = await rejectAgencyJoin(hostId); if (ok) await loadAll(); } },
-    ]);
+  const reviewLeaveRequest = async (request, approve) => {
+    setReviewingLeaveRequestId(request.id);
+    const { data, error } = await supabase.rpc(
+      approve ? 'approve_leave_request' : 'reject_leave_request',
+      { p_host_id: request.host_id, p_review_note: null },
+    );
+    setReviewingLeaveRequestId(null);
+    if (error || !data?.success) {
+      Alert.alert('Request failed', data?.message || error?.message || 'Please try again.');
+      return;
+    }
+    Alert.alert(approve ? 'Leave approved' : 'Leave rejected', approve
+      ? `${request.host?.full_name || 'The host'} has been released from your agency.`
+      : `${request.host?.full_name || 'The host'} remains active in your agency.`);
+    await refreshAgencies?.();
+    await loadAll();
   };
 
-  const handleRelease = async (hostId, hostName) => {
-    Alert.alert('Release host?', `${hostName} will be removed from your agency.`, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Release', style: 'destructive', onPress: async () => { const ok = await releaseAgencyMember(hostId); if (ok) { Alert.alert('Released', `${hostName} removed.`); await loadAll(); } } },
-    ]);
+  const confirmJoinReview = (request, approve) => {
+    Alert.alert(
+      approve ? 'Accept host?' : 'Reject request?',
+      approve
+        ? `${request.user?.full_name || 'This user'} will become an active host in your agency.`
+        : `${request.user?.full_name || 'This user'} will be notified that the request was rejected.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: approve ? 'Accept' : 'Reject', style: approve ? 'default' : 'destructive', onPress: () => reviewJoinRequest(request, approve) },
+      ]
+    );
   };
 
-  const handleApproveLeave = async (hostId, hostName) => {
-    Alert.alert('Approve leave?', `${hostName} will be removed from your agency.`, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Approve', style: 'destructive', onPress: async () => { const ok = await approveLeaveRequest(hostId); if (ok) { Alert.alert('Leave approved'); await loadAll(); } } },
-    ]);
-  };
-
-  const handleRejectLeave = async (hostId, hostName) => {
-    Alert.alert('Reject leave?', `${hostName} will stay as an active host.`, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Keep host', onPress: async () => { const ok = await rejectLeaveRequest(hostId); if (ok) { Alert.alert('Leave rejected'); await loadAll(); } } },
-    ]);
+  const confirmLeaveReview = (request, approve) => {
+    Alert.alert(
+      approve ? 'Approve leave?' : 'Reject leave?',
+      approve
+        ? `${request.host?.full_name || 'This host'} will leave your agency and the 50,000 diamond penalty will be charged.`
+        : `${request.host?.full_name || 'This host'} will stay active in your agency.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: approve ? 'Approve' : 'Reject', style: approve ? 'destructive' : 'default', onPress: () => reviewLeaveRequest(request, approve) },
+      ]
+    );
   };
 
   const handleRename = async () => {
@@ -324,13 +398,14 @@ export default function AgencyOwnerView() {
     { key: 'hosts',     label: 'Hosts',     icon: 'people-outline' },
     { key: 'inventory', label: 'Inventory', icon: 'layers-outline' },
     { key: 'earnings',  label: 'Earnings',  icon: 'trending-up-outline' },
+    { key: 'reports',   label: 'Host Report', icon: 'calendar-outline' },
     { key: 'topups',    label: 'Topups',    icon: 'card-outline' },
     { key: 'requests',  label: 'Members',   icon: 'git-pull-request-outline' },
   ];
 
   const tabBadge = (key) => {
     if (key === 'topups') return pendingTopups.length;
-    if (key === 'requests') return pendingRequests.length + leavePending.length;
+    if (key === 'requests') return pendingRequests.length + leaveRequests.length;
     return 0;
   };
 
@@ -432,12 +507,6 @@ export default function AgencyOwnerView() {
                       <Text style={s.sendDiamondText}>Send 💎</Text>
                     </LinearGradient>
                   </TouchableOpacity>
-                  <TouchableOpacity
-                    style={s.releaseBtn}
-                    onPress={() => handleRelease(item.host_id, item.profiles?.full_name)}
-                  >
-                    <Ionicons name="exit-outline" size={16} color="#F43F5E" />
-                  </TouchableOpacity>
                 </View>
               </View>
             );
@@ -455,6 +524,10 @@ export default function AgencyOwnerView() {
       contentContainerStyle={{ padding: cardPadding, paddingBottom: 40, maxWidth: maxContentWidth, alignSelf: 'center', width: '100%' }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#A78BFA" />}
     >
+      <TouchableOpacity onPress={() => router.push('/main/earnings')} style={{ backgroundColor: '#6D28D9', borderRadius: 14, padding: 14, marginBottom: 14, flexDirection: 'row', justifyContent: 'center', gap: 8 }}>
+        <Ionicons name="wallet-outline" size={18} color="#FFF" />
+        <Text style={{ color: '#FFF', fontWeight: '900' }}>Withdraw My Own Bins</Text>
+      </TouchableOpacity>
       {/* Inventory Cards */}
       <View style={[s.invRow, !isPhone && { flexDirection: 'row', gap: 12 }]}>
         {/* Beans Card */}
@@ -578,6 +651,33 @@ export default function AgencyOwnerView() {
           ))
         )}
       </View>
+    </ScrollView>
+  );
+
+  const renderReports = () => (
+    <ScrollView contentContainerStyle={{ padding: cardPadding, paddingBottom: 40, maxWidth: maxContentWidth, alignSelf: 'center', width: '100%' }}>
+      <Text style={s.sectionTitle}>Host income and video-time report</Text>
+      <View style={{ flexDirection: 'row', gap: 8, marginVertical: 12 }}>
+        <TouchableOpacity onPress={() => useReportPreset(false)} style={{ flex: 1, padding: 11, borderRadius: 10, backgroundColor: '#2563EB' }}><Text style={{ color: '#FFF', textAlign: 'center', fontWeight: '800' }}>Current Month</Text></TouchableOpacity>
+        <TouchableOpacity onPress={() => useReportPreset(true)} style={{ flex: 1, padding: 11, borderRadius: 10, backgroundColor: '#4C1D95' }}><Text style={{ color: '#FFF', textAlign: 'center', fontWeight: '800' }}>Previous Month</Text></TouchableOpacity>
+      </View>
+      <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center', marginBottom: 12 }}>
+        <TextInput value={reportStart} onChangeText={setReportStart} placeholder="YYYY-MM-DD" placeholderTextColor="#6B7280" style={{ flex: 1, color: '#FFF', backgroundColor: '#111827', borderRadius: 10, paddingHorizontal: 10, height: 42 }} />
+        <TextInput value={reportEnd} onChangeText={setReportEnd} placeholder="YYYY-MM-DD" placeholderTextColor="#6B7280" style={{ flex: 1, color: '#FFF', backgroundColor: '#111827', borderRadius: 10, paddingHorizontal: 10, height: 42 }} />
+        <TouchableOpacity onPress={() => loadHostReport()} style={{ padding: 11, borderRadius: 10, backgroundColor: '#059669' }}><Ionicons name="search" size={18} color="#FFF" /></TouchableOpacity>
+      </View>
+      {reportLoading ? <LogoLoader size="small" /> : reportRows.length === 0 ? <Text style={s.emptyText}>No host activity in this date range.</Text> : reportRows.map((row, index) => (
+        <View key={`${row.host_id}-${row.report_day}-${index}`} style={s.payoutCard}>
+          <View style={{ flex: 1 }}>
+            <Text style={s.payoutName}>{row.host_name || 'Host'} • ID {row.host_display_id || '—'}</Text>
+            <Text style={s.payoutDate}>{row.report_day} • {Number(row.live_sessions || 0)} valid day</Text>
+          </View>
+          <View style={{ alignItems: 'flex-end' }}>
+            <Text style={s.payoutBeans}>{Number(row.income || 0).toLocaleString()} bins</Text>
+            <Text style={s.payoutBdt}>{Number(row.live_minutes || 0).toLocaleString()} video min</Text>
+          </View>
+        </View>
+      ))}
     </ScrollView>
   );
 
@@ -773,65 +873,88 @@ export default function AgencyOwnerView() {
         <Text style={s.emptyText}>No pending join requests.</Text>
       ) : (
         pendingRequests.map((req) => (
-          <View key={`join-${req.host_id}`} style={[s.requestCard, { borderLeftColor: '#34D399' }]}>
+          <View key={`join-${req.id}`} style={[s.requestCard, { borderLeftColor: '#34D399' }]}>
             <Image
-              source={{ uri: req.profiles?.avatar_url || `https://i.pravatar.cc/150?u=${req.host_id}` }}
+              source={{ uri: req.user?.avatar_url || `https://i.pravatar.cc/150?u=${req.user_id}` }}
               style={s.reqAvatar}
             />
             <View style={{ flex: 1 }}>
-              <Text style={s.reqName}>{req.profiles?.full_name}</Text>
-              <Text style={s.reqId}>ID: {req.profiles?.display_id}</Text>
+              <Text style={s.reqName}>{req.user?.full_name || 'User'}</Text>
+              <Text style={s.reqId}>ID: {req.user?.display_id}</Text>
+              <Text style={s.reqId}>{new Date(req.created_at).toLocaleString()}</Text>
+              {!!req.applicant_note && <Text style={s.reqId} numberOfLines={2}>{req.applicant_note}</Text>}
             </View>
-            <TouchableOpacity onPress={() => handleApprove(req.host_id)} activeOpacity={0.8}>
-              <LinearGradient colors={['#34D399', '#059669']} style={s.reqApproveBtn}>
-                <Text style={s.reqBtnText}>Approve</Text>
-              </LinearGradient>
-            </TouchableOpacity>
-            <TouchableOpacity style={s.reqRejectBtn} onPress={() => handleReject(req.host_id, req.profiles?.full_name)}>
-              <Ionicons name="close" size={16} color="#FFF" />
-            </TouchableOpacity>
+            <View style={s.ownerRequestActions}>
+              <TouchableOpacity
+                disabled={reviewingRequestId === req.id}
+                onPress={() => confirmJoinReview(req, true)}
+                style={[s.ownerReviewAction, s.ownerApproveAction]}
+              >
+                <Ionicons name="checkmark" size={15} color="#FFF" />
+                <Text style={s.ownerReviewActionText}>{reviewingRequestId === req.id ? 'Wait' : 'Accept'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                disabled={reviewingRequestId === req.id}
+                onPress={() => confirmJoinReview(req, false)}
+                style={[s.ownerReviewAction, s.ownerRejectAction]}
+              >
+                <Ionicons name="close" size={15} color="#FFF" />
+              </TouchableOpacity>
+            </View>
           </View>
         ))
       )}
 
-      {/* ── Leave Requests ── */}
-      <View style={[s.sectionHeader, { marginTop: 28 }]}>
+      {/* -- Leave Requests -- */}
+      <View style={[s.sectionHeader, { marginTop: 24 }]}>
         <View style={[s.sectionIconCircle, { backgroundColor: 'rgba(244,63,94,0.15)' }]}>
           <Ionicons name="log-out-outline" size={16} color="#F43F5E" />
         </View>
         <Text style={s.sectionTitle}>Leave Requests</Text>
-        {leavePending.length > 0 && (
-          <View style={[s.countBadge, { backgroundColor: '#F43F5E' }]}><Text style={s.countBadgeText}>{leavePending.length}</Text></View>
+        {leaveRequests.length > 0 && (
+          <View style={[s.countBadge, { backgroundColor: '#F43F5E' }]}><Text style={s.countBadgeText}>{leaveRequests.length}</Text></View>
         )}
       </View>
 
-      {leavePending.length === 0 ? (
+      {leaveRequests.length === 0 ? (
         <Text style={s.emptyText}>No pending leave requests.</Text>
       ) : (
-        leavePending.map((req) => (
-          <View key={`leave-${req.host_id}`} style={[s.requestCard, { borderLeftColor: '#F43F5E' }]}>
+        leaveRequests.map((req) => (
+          <View key={`leave-${req.id}`} style={[s.requestCard, { borderLeftColor: '#F43F5E' }]}>
             <Image
-              source={{ uri: req.profiles?.avatar_url || `https://i.pravatar.cc/150?u=${req.host_id}` }}
+              source={{ uri: req.host?.avatar_url || `https://i.pravatar.cc/150?u=${req.host_id}` }}
               style={s.reqAvatar}
             />
             <View style={{ flex: 1 }}>
-              <Text style={s.reqName}>{req.profiles?.full_name}</Text>
-              <Text style={s.reqId}>ID: {req.profiles?.display_id} • {(req.profiles?.beans || 0).toLocaleString()} beans</Text>
+              <Text style={s.reqName}>{req.host?.full_name || 'Host'}</Text>
+              <Text style={s.reqId}>ID: {req.host?.display_id}</Text>
+              <Text style={s.reqId}>{new Date(req.requested_at).toLocaleString()}</Text>
+              <Text style={[s.reqId, { color: '#FBBF24' }]}>
+                Penalty on approval: {Number(req.penalty_amount || 50000).toLocaleString()} diamonds
+              </Text>
             </View>
-            <TouchableOpacity onPress={() => handleApproveLeave(req.host_id, req.profiles?.full_name)} activeOpacity={0.8}>
-              <LinearGradient colors={['#F43F5E', '#BE123C']} style={s.reqApproveBtn}>
-                <Text style={s.reqBtnText}>Release</Text>
-              </LinearGradient>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[s.reqRejectBtn, { backgroundColor: '#059669' }]}
-              onPress={() => handleRejectLeave(req.host_id, req.profiles?.full_name)}
-            >
-              <Ionicons name="checkmark" size={16} color="#FFF" />
-            </TouchableOpacity>
+            <View style={s.ownerRequestActions}>
+              <TouchableOpacity
+                disabled={reviewingLeaveRequestId === req.id}
+                onPress={() => confirmLeaveReview(req, true)}
+                style={[s.ownerReviewAction, s.ownerRejectAction]}
+              >
+                <Ionicons name="checkmark" size={15} color="#FFF" />
+                <Text style={s.ownerReviewActionText}>{reviewingLeaveRequestId === req.id ? 'Wait' : 'Accept'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                disabled={reviewingLeaveRequestId === req.id}
+                onPress={() => confirmLeaveReview(req, false)}
+                style={[s.ownerReviewAction, s.ownerApproveAction]}
+              >
+                <Ionicons name="close" size={15} color="#FFF" />
+                <Text style={s.ownerReviewActionText}>Reject</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         ))
       )}
+
     </ScrollView>
   );
 
@@ -918,20 +1041,20 @@ export default function AgencyOwnerView() {
         </View>
 
         {/* Alert Chips */}
-        {(leavePending.length > 0 || pendingRequests.length > 0) && (
+        {(pendingRequests.length > 0 || leaveRequests.length > 0) && (
           <View style={s.alertRow}>
-            {leavePending.length > 0 && (
-              <TouchableOpacity style={s.alertChip} onPress={() => setOwnerSubTab('requests')}>
-                <View style={s.alertPulse} />
-                <Ionicons name="log-out-outline" size={12} color="#FFF" />
-                <Text style={s.alertChipText}>{leavePending.length} leave</Text>
-              </TouchableOpacity>
-            )}
             {pendingRequests.length > 0 && (
               <TouchableOpacity style={[s.alertChip, { backgroundColor: 'rgba(52,211,153,0.20)' }]} onPress={() => setOwnerSubTab('requests')}>
                 <View style={[s.alertPulse, { backgroundColor: '#34D399' }]} />
                 <Ionicons name="log-in-outline" size={12} color="#FFF" />
                 <Text style={s.alertChipText}>{pendingRequests.length} join</Text>
+              </TouchableOpacity>
+            )}
+            {leaveRequests.length > 0 && (
+              <TouchableOpacity style={[s.alertChip, { backgroundColor: 'rgba(244,63,94,0.20)' }]} onPress={() => setOwnerSubTab('requests')}>
+                <View style={[s.alertPulse, { backgroundColor: '#F43F5E' }]} />
+                <Ionicons name="log-out-outline" size={12} color="#FFF" />
+                <Text style={s.alertChipText}>{leaveRequests.length} leave</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -973,6 +1096,7 @@ export default function AgencyOwnerView() {
       {ownerSubTab === 'hosts'      ? renderHosts()
         : ownerSubTab === 'inventory' ? renderInventory()
         : ownerSubTab === 'earnings'  ? renderEarnings()
+        : ownerSubTab === 'reports'   ? renderReports()
         : ownerSubTab === 'topups'    ? renderTopups()
         : renderRequests()}
 
@@ -1809,6 +1933,26 @@ const s = StyleSheet.create({
     color: '#6B7280',
     fontSize: 11,
     marginTop: 2,
+  },
+  ownerRequestActions: {
+    alignItems: 'stretch',
+    gap: 6,
+  },
+  ownerReviewAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 9,
+  },
+  ownerApproveAction: { backgroundColor: '#059669' },
+  ownerRejectAction: { backgroundColor: '#BE123C' },
+  ownerReviewActionText: {
+    color: '#FFF',
+    fontSize: 10,
+    fontWeight: '800',
   },
   reqApproveBtn: {
     paddingHorizontal: 16,

@@ -20,7 +20,7 @@ export default function MyInvitesScreen() {
     if (!referralCode) return;
     try {
       await Share.share({
-        message: `Join me on Care Live! Use my referral code ${referralCode} to get bonus diamonds! https://yolo-live.app/download`,
+        message: `Join me on Popular Live! Use my referral code ${referralCode} to get bonus diamonds! https://yolo-live.app/download`,
       });
     } catch (error) {
       Alert.alert('Share failed', error.message);

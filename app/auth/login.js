@@ -6,7 +6,6 @@ import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import Svg, { Path } from 'react-native-svg';
 import { LinearGradient } from 'expo-linear-gradient';
 import { supabase } from '../../src/api/supabase';
-import { logAnalyticsEvent } from '../../src/lib/firebase';
 import { TENANT_CONFIG } from '../../tenant.config';
 
 const AUTH_BACKGROUND = require('../../assets/onboarding/google-auth-background.webp');
@@ -94,14 +93,13 @@ const LoginScreen = () => {
         } catch (_) {}
       }
 
-      await logAnalyticsEvent('login', { method: 'google' }).catch(() => {});
       router.replace('/main/(tabs)');
     } catch (error) {
       const message = error?.message || 'Google sign-in could not complete.';
       if (String(message).includes('DEVELOPER_ERROR')) {
         Alert.alert(
           'Google sign-in setup needed',
-          `Android Google Sign-In is not authorized for this build yet.\n\nRegister these SHA-1 fingerprints for package com.carelive.app in Firebase / Google Cloud, then rebuild:\n${GOOGLE_ANDROID_SHA1S.join('\n')}`
+          `Android Google Sign-In is not authorized for this build yet.\n\nRegister these SHA-1 fingerprints for the configured Android package in Google Cloud Console, then rebuild:\n${GOOGLE_ANDROID_SHA1S.join('\n')}`
         );
         return;
       }

@@ -1,27 +1,21 @@
 import { useEffect } from 'react';
 import { ImageBackground, StyleSheet } from 'react-native';
-import { Stack, usePathname } from 'expo-router';
+import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
-import { GlobalStateProvider, useGlobalState } from '../src/context/GlobalStateContext';
+import { GlobalStateProvider } from '../src/context/GlobalStateContext';
 import MaintenanceGate from '../src/components/MaintenanceGate';
 import { CuteAlertHost } from '../src/components/CuteAlert';
 import ErrorBoundary from '../src/components/ErrorBoundary';
 import ForceUpdateGate from '../src/components/ForceUpdateGate';
+import DeviceAccessGate from '../src/components/DeviceAccessGate';
+import GlobalAnnouncementHost from '../src/components/GlobalAnnouncementHost';
 import RemoteSplashGate from '../src/components/RemoteSplashGate';
 import { installGlobalErrorHandler } from '../src/utils/crashReport';
-import { ensureNotificationPermission } from '../src/utils/notifPermission';
 import { configureAudioSession } from '../src/audio/audioSession';
-import {
-  clearFirebaseUser,
-  identifyFirebaseUser,
-  startFirebaseMessagingListeners,
-  syncCurrentPushToken,
-  trackScreenView,
-  unregisterCurrentPushToken,
-} from '../src/lib/firebase';
+import { useGlobalPermissions } from '../src/hooks/useGlobalPermissions';
 import "../global.css";
 
 const APP_BACKGROUND = require('../assets/backgrounds/neon-space.webp');
@@ -50,8 +44,7 @@ configureAudioSession();
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
 function RootContent() {
-  const pathname = usePathname();
-  const { user, role } = useGlobalState();
+  const { requestAllPermissions } = useGlobalPermissions();
 
   useEffect(() => {
     // Hide the native splash one frame after mount. By this point the
@@ -66,40 +59,14 @@ function RootContent() {
   }, []);
 
   useEffect(() => {
-    trackScreenView(pathname);
-  }, [pathname]);
-
-  useEffect(() => {
-    const stop = startFirebaseMessagingListeners();
-    return () => {
-      try { stop?.(); } catch (_) {}
-    };
-  }, []);
-
-  useEffect(() => {
-    if (user?.id) {
-      identifyFirebaseUser({
-        id: user.id,
-        role,
-        vipType: user.vipType,
-      });
-    } else {
-      clearFirebaseUser();
-    }
-  }, [user?.id, user?.vipType, role]);
-
-  useEffect(() => {
-    if (!user?.id) return;
-
-    if (user.pushNotificationsEnabled === false) {
-      unregisterCurrentPushToken();
-      return;
-    }
-
-    ensureNotificationPermission()
-      .then(() => syncCurrentPushToken())
-      .catch(() => {});
-  }, [user?.id, user?.pushNotificationsEnabled]);
+    // Let the first app frame settle before presenting Android's native
+    // permission sheets. The first-install attempt is persisted before the
+    // sequence begins, so later cold starts never repeat it.
+    const timer = setTimeout(() => {
+      requestAllPermissions().catch(() => {});
+    }, 900);
+    return () => clearTimeout(timer);
+  }, [requestAllPermissions]);
 
   return (
     <KeyboardProvider>
@@ -117,8 +84,9 @@ function RootContent() {
         {/* ForceUpdateGate sits ABOVE MaintenanceGate so an older binary
             sees the update screen before it tries to render anything
             that might reference an RPC signature it doesn't know. */}
-        <ForceUpdateGate>
-          <MaintenanceGate>
+        <DeviceAccessGate>
+          <ForceUpdateGate>
+            <MaintenanceGate>
             <Stack screenOptions={{ headerShown: false, contentStyle: styles.transparentScene }}>
               <Stack.Screen name="index" options={{ headerShown: false }} />
               <Stack.Screen name="auth/login" options={{ headerShown: false }} />
@@ -130,14 +98,16 @@ function RootContent() {
                 options={{ headerShown: false, presentation: 'fullScreenModal', animation: 'none' }}
               />
             </Stack>
-          </MaintenanceGate>
-        </ForceUpdateGate>
-        <CuteAlertHost />
-        {/* Remote splash overlay — admin-controlled seasonal artwork.
-            Sits as a sibling of the Stack (not a wrapper) so the
-            navigation tree keeps warming up while the splash is
-            visible. Self-dismisses after its configured duration. */}
-        <RemoteSplashGate />
+            </MaintenanceGate>
+          </ForceUpdateGate>
+          <CuteAlertHost />
+          <GlobalAnnouncementHost />
+          {/* Remote splash overlay — admin-controlled seasonal artwork.
+              Sits as a sibling of the Stack (not a wrapper) so the
+              navigation tree keeps warming up while the splash is
+              visible. Self-dismisses after its configured duration. */}
+          <RemoteSplashGate />
+        </DeviceAccessGate>
         </ImageBackground>
       </SafeAreaProvider>
     </KeyboardProvider>

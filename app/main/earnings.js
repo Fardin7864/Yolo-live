@@ -24,7 +24,7 @@ export default function EarningsScreen() {
 
   const [showTransferModal, setShowTransferModal] = useState(false);
   const [transferAmount, setTransferAmount] = useState('');
-  const [settlementMode, setSettlementMode] = useState('agency'); // 'agency' | 'diamonds'
+  const [settlementMode, setSettlementMode] = useState('holder'); // 'holder' | 'diamonds'
   const [transferHistory, setTransferHistory] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
   // True while a payout / conversion RPC is in flight. Disables the
@@ -69,7 +69,7 @@ export default function EarningsScreen() {
       .from('transactions')
       .select('*')
       .eq('user_id', user.id)
-      .in('type', ['agency_payout', 'bean_convert'])
+      .in('type', ['bins_withdrawal', 'bean_convert'])
       .order('created_at', { ascending: false })
       .limit(10);
     if (error) {
@@ -101,14 +101,10 @@ export default function EarningsScreen() {
     let title = 'Confirm';
     let message = '';
 
-    if (settlementMode === 'agency') {
-      if (!isInAgency) {
-        Alert.alert('No Agency', 'You are not bound to any agency. Join one first.');
-        return;
-      }
-      title = 'Agency Payout';
+    if (settlementMode === 'holder') {
+      title = 'Bins Holder Withdrawal';
       const earnTk = (amount / 1000) * payoutRatePer1k;
-      message = `Request payout of ${amount.toLocaleString()} beans from ${myAgency.name}?\n\nYou will receive ৳${earnTk.toFixed(0)} after approval.`;
+      message = `Send ${amount.toLocaleString()} bins to holder ID 990001?\n\nYou will receive ৳${earnTk.toFixed(0)} after admin approval.`;
     } else {
       title = 'Convert to Diamonds';
       const dia = Math.floor(amount * conversionRate);
@@ -128,7 +124,7 @@ export default function EarningsScreen() {
           setSubmitting(true);
           let success = false;
           try {
-            if (settlementMode === 'agency') {
+            if (settlementMode === 'holder') {
               const res = await requestPayout(amount);
               success = !!res;
             } else {
@@ -150,9 +146,9 @@ export default function EarningsScreen() {
 
   const renderHistoryRow = (tx) => {
     const isCredit = tx.amount > 0;
-    const isAgency = tx.type === 'agency_payout';
-    const icon = isAgency ? 'business' : 'swap-horizontal';
-    const label = isAgency ? 'Agency Payout' : tx.currency === 'diamond' ? 'Converted to Diamonds' : 'Beans Used';
+    const isAgency = tx.type === 'bins_withdrawal';
+    const icon = isAgency ? 'wallet' : 'swap-horizontal';
+    const label = isAgency ? 'Bins Holder • ID 990001' : tx.currency === 'diamond' ? 'Converted to Diamonds' : 'Bins Used';
 
     return (
       <View key={tx.id} style={styles.historyRow}>
@@ -216,16 +212,16 @@ export default function EarningsScreen() {
         </View>
 
         <View style={styles.methodsGrid}>
-          {isInAgency && (
+          {['host', 'agency_owner', 'admin', 'super_admin'].includes(user?.role) && (
             <TouchableOpacity
-              style={[styles.methodCard, settlementMode === 'agency' && styles.methodCardActive]}
-              onPress={() => { setSettlementMode('agency'); setShowTransferModal(true); }}
+              style={[styles.methodCard, settlementMode === 'holder' && styles.methodCardActive]}
+              onPress={() => { setSettlementMode('holder'); setShowTransferModal(true); }}
             >
               <View style={[styles.methodIcon, { backgroundColor: 'rgba(56, 189, 248, 0.1)' }]}>
                 <Ionicons name="business" size={24} color="#38BDF8" />
               </View>
-              <Text style={styles.methodName}>Agency Payout</Text>
-              <Text style={styles.methodSub}>BDT Cash</Text>
+              <Text style={styles.methodName}>Bins Holder</Text>
+              <Text style={styles.methodSub}>ID 990001 • BDT Cash</Text>
             </TouchableOpacity>
           )}
 
@@ -274,13 +270,13 @@ export default function EarningsScreen() {
             <View style={styles.modalContent}>
               <View style={styles.modalHandle} />
               <Text style={styles.modalTitle}>
-                {settlementMode === 'agency' ? 'Agency Payout' : 'Exchange for Diamonds'}
+                {settlementMode === 'holder' ? 'Bins Holder Withdrawal' : 'Exchange for Diamonds'}
               </Text>
 
-              {settlementMode === 'agency' && myAgency && (
+              {settlementMode === 'holder' && (
                 <View style={styles.agencyInfoBox}>
                   <Ionicons name="business" size={20} color="#38BDF8" />
-                  <Text style={styles.agencyInfoText}>Receiver: {myAgency.name}</Text>
+                  <Text style={styles.agencyInfoText}>Receiver: Popular Live Bins Holder • ID 990001</Text>
                 </View>
               )}
 
@@ -306,10 +302,10 @@ export default function EarningsScreen() {
               {parseInt(transferAmount, 10) > 0 && (
                 <View style={styles.conversionPreview}>
                   <Text style={styles.conversionText}>
-                    {settlementMode === 'agency' ? 'You will receive:' : 'You will get:'}
+                    {settlementMode === 'holder' ? 'You will receive:' : 'You will get:'}
                   </Text>
                   <Text style={styles.conversionValue}>
-                    {settlementMode === 'agency'
+                    {settlementMode === 'holder'
                       ? `৳${((parseInt(transferAmount, 10) / 1000) * payoutRatePer1k).toLocaleString()}`
                       : `${Math.floor(parseInt(transferAmount, 10) * conversionRate).toLocaleString()} 💎`}
                   </Text>

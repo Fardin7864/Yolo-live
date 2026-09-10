@@ -1,60 +1,84 @@
-import { Alert } from 'react-native';
+import { useCallback } from 'react';
+import { Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Camera } from 'expo-camera';
+import * as Location from 'expo-location';
 import * as MediaLibrary from 'expo-media-library';
-import Constants from 'expo-constants';
+import {
+    GLOBAL_PERMISSION_ONBOARDING_KEY,
+    getAndroidMediaGranularPermissions,
+} from './globalPermissionPolicy';
 
-/**
- * useGlobalPermissions
- * A hook to request all necessary permissions sequentially.
- * Fixes: 
- * 1. TypeError by using named 'Camera' export (SDK 54).
- * 2. Crash in Expo Go by removing top-level expo-notifications import.
- */
+let requestInFlight = null;
+
+const requestIfNeeded = async (getCurrent, request) => {
+    const current = await getCurrent();
+    if (current?.status === 'granted' || current?.granted === true) return current;
+    if (current?.canAskAgain === false) return current;
+    return request();
+};
+
 export const useGlobalPermissions = () => {
-    
-    const requestAllPermissions = async () => {
-        try {
-            if (__DEV__) console.log('[Permissions] starting global request');
-            const isExpoGo = Constants.appOwnership === 'expo';
+    const requestAllPermissions = useCallback(async ({ force = false } = {}) => {
+        if (Platform.OS !== 'android') return { skipped: true, reason: 'not-android' };
+        if (requestInFlight) return requestInFlight;
 
-            // 1. Camera & Microphone
-            try {
-                const camRes = await Camera.requestCameraPermissionsAsync();
-                const micRes = await Camera.requestMicrophonePermissionsAsync();
-                if (__DEV__) console.log('[Permissions] camera:', camRes.status, 'mic:', micRes.status);
-            } catch (cameraErr) {
-                if (__DEV__) console.warn('Camera/Mic permission failed:', cameraErr.message);
+        requestInFlight = (async () => {
+            if (!force) {
+                const completed = await AsyncStorage.getItem(GLOBAL_PERMISSION_ONBOARDING_KEY);
+                if (completed === 'completed') return { skipped: true, reason: 'already-completed' };
+
+                // Persist the attempt before opening Android's native sheets.
+                // A denial, interruption, or app restart must not turn this into
+                // a popup sequence on every later launch.
+                await AsyncStorage.setItem(GLOBAL_PERMISSION_ONBOARDING_KEY, 'completed');
             }
 
-            // 2. Media Library
-            try {
-                const mediaRes = await MediaLibrary.requestPermissionsAsync();
-                if (__DEV__) console.log('[Permissions] media:', mediaRes.status);
-            } catch (mediaErr) {
-                if (__DEV__) console.warn('Media Library permission failed:', mediaErr.message);
-            }
+            const results = {};
+            const granularMediaPermissions = getAndroidMediaGranularPermissions(Platform.Version);
 
-            // 3. Notifications (skipped in Expo Go because expo-notifications
-            //    triggers a top-level side effect that crashes Expo Go SDK 54+)
-            if (!isExpoGo) {
+            // Android only presents one dangerous-permission dialog at a time.
+            // Awaiting every request keeps the sequence deterministic and avoids
+            // one system sheet swallowing another on slower devices.
+            const steps = [
+                ['camera',
+                    Camera.getCameraPermissionsAsync,
+                    Camera.requestCameraPermissionsAsync],
+                ['microphone',
+                    Camera.getMicrophonePermissionsAsync,
+                    Camera.requestMicrophonePermissionsAsync],
+                ['location',
+                    Location.getForegroundPermissionsAsync,
+                    Location.requestForegroundPermissionsAsync],
+                ['media',
+                    () => MediaLibrary.getPermissionsAsync(false, granularMediaPermissions),
+                    () => MediaLibrary.requestPermissionsAsync(false, granularMediaPermissions)],
+            ];
+
+            for (const [id, getCurrent, request] of steps) {
                 try {
-                    const Notifications = require('expo-notifications');
-                    const { status: existingStatus } = await Notifications.getPermissionsAsync();
-                    if (existingStatus !== 'granted') {
-                        await Notifications.requestPermissionsAsync();
-                    }
-                } catch (notiErr) {
-                    if (__DEV__) console.warn('Notification permission failed:', notiErr.message);
+                    results[id] = await requestIfNeeded(getCurrent, request);
+                } catch (error) {
+                    results[id] = {
+                        status: 'denied',
+                        canAskAgain: true,
+                        requestFailed: true,
+                        error: error?.message || 'Permission request failed',
+                    };
+                    if (__DEV__) console.warn(`[Permissions] ${id} request failed:`, error?.message);
                 }
             }
 
-            if (__DEV__) console.log('[Permissions] finished');
+            return { skipped: false, results };
+        })().catch((error) => {
+            if (__DEV__) console.warn('[Permissions] onboarding failed:', error?.message);
+            return { skipped: false, error };
+        }).finally(() => {
+            requestInFlight = null;
+        });
 
-        } catch (error) {
-            if (__DEV__) console.error('Critical Error in useGlobalPermissions:', error);
-            Alert.alert("Permission Hub Error", "App could not initialize permissions correctly.");
-        }
-    };
+        return requestInFlight;
+    }, []);
 
     return { requestAllPermissions };
 };

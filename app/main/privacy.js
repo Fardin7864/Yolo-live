@@ -31,7 +31,7 @@ export default function PrivacyScreen() {
 
         <Text style={styles.sectionTitle}>2. How We Use Your Information</Text>
         <Text style={styles.paragraph}>
-          We use the information we collect to operate, maintain, and improve Care Live. Specifically, we use it to authenticate you, process your virtual transactions, monitor safety, and prevent fraudulent activities.
+          We use the information we collect to operate, maintain, and improve Popular Live. Specifically, we use it to authenticate you, process your virtual transactions, monitor safety, and prevent fraudulent activities.
         </Text>
 
         <Text style={styles.sectionTitle}>3. Data Protection</Text>

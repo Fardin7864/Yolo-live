@@ -10,7 +10,8 @@ import { useRouter } from 'expo-router';
 import { useGlobalState } from '../../../src/context/GlobalStateContext';
 import { supabase } from '../../../src/api/supabase';
 import { useResponsive } from '../../../src/hooks/useResponsive';
-import SvipNameTag from '../../../src/components/SvipNameTag';
+import ProfileIdentityBadges from '../../../src/components/ProfileIdentityBadges';
+import { getWealthProgress } from '../../../src/utils/wealthLevels';
 
 const PROFILE_ASSETS = {
   background: require('../../../assets/profile/background.webp'),
@@ -69,9 +70,10 @@ export default function ProfileScreen() {
   const router = useRouter();
   const { width } = useWindowDimensions();
   const { maxContentWidth, isTablet } = useResponsive();
-  const { diamonds, user, loading, myReseller, systemSettings } = useGlobalState();
+  const { diamonds, user, loading, myReseller, ownedAgency } = useGlobalState();
   const [counts, setCounts] = useState({ followers: 0, following: 0, friends: 0 });
   const [countsStatus, setCountsStatus] = useState('loading');
+  const [agencyRequestCount, setAgencyRequestCount] = useState(0);
 
   useEffect(() => {
     if (!user?.id) return undefined;
@@ -104,6 +106,43 @@ export default function ProfileScreen() {
     return () => { cancelled = true; };
   }, [user?.id]);
 
+  useEffect(() => {
+    if (!ownedAgency?.id) {
+      setAgencyRequestCount(0);
+      return undefined;
+    }
+
+    let active = true;
+    const loadAgencyRequestCount = async () => {
+      const { count, error } = await supabase
+        .from('agency_join_requests')
+        .select('id', { count: 'exact', head: true })
+        .eq('agency_id', ownedAgency.id)
+        .eq('status', 'pending');
+      if (!active) return;
+      if (error) {
+        console.warn('agency request count:', error.message);
+        return;
+      }
+      setAgencyRequestCount(count || 0);
+    };
+
+    loadAgencyRequestCount();
+    const channel = supabase
+      .channel(`profile-agency-requests-${ownedAgency.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'agency_join_requests', filter: `agency_id=eq.${ownedAgency.id}` },
+        loadAgencyRequestCount
+      )
+      .subscribe();
+
+    return () => {
+      active = false;
+      supabase.removeChannel(channel);
+    };
+  }, [ownedAgency?.id]);
+
   if (loading || !user) {
     return (
       <SafeAreaView style={styles.loading}>
@@ -113,13 +152,10 @@ export default function ProfileScreen() {
   }
 
   const contentWidth = Math.min(width, maxContentWidth);
-  const level = Number(user.level) || 1;
-  const expMultiplier = Number(systemSettings?.level_exp_multiplier) || 1500;
   const totalExp = Math.max(0, Number(user.lifetimeDiamondsSpent) || 0);
-  const levelFloor = Math.max(0, (level - 1) * expMultiplier);
-  const levelProgress = level >= 100
-    ? 100
-    : Math.min(100, Math.max(8, ((totalExp - levelFloor) / expMultiplier) * 100));
+  const wealth = getWealthProgress(totalExp);
+  const level = wealth.level;
+  const levelProgress = wealth.progress;
   const countValue = (value) => {
     if (countsStatus === 'loading') return '…';
     if (countsStatus === 'error') return '—';
@@ -142,7 +178,7 @@ export default function ProfileScreen() {
   ];
 
   const menuItems = [
-    { label: 'My Agency', icon: PROFILE_ASSETS.agency, route: '/main/agency' },
+    { label: 'Agencies', icon: PROFILE_ASSETS.agency, route: '/main/agency', badge: agencyRequestCount },
     { label: resellerActive ? 'My Reseller' : 'Become Reseller', icon: PROFILE_ASSETS.reseller, route: '/main/reseller-dashboard' },
     { label: 'Host Stats', icon: PROFILE_ASSETS.hostStats, route: '/main/host-stats' },
     { label: 'My Level', icon: PROFILE_ASSETS.level, route: '/main/level' },
@@ -179,19 +215,16 @@ export default function ProfileScreen() {
               <View style={styles.identity}>
                 <View style={styles.nameRow}>
                   <Text style={styles.userName} numberOfLines={1}>{user.name || 'Yolo User'}</Text>
-                  <SvipNameTag vipType={user.vipType} compact />
                   <Image source={PROFILE_ASSETS.verified} style={styles.verified} />
                 </View>
-                <View style={styles.badgeRow}>
-                  <LinearGradient colors={['#FFAF28', '#FFD766']} style={styles.levelPill}>
-                    <Ionicons name="star" size={12} color="#3C1B77" />
-                    <Text style={styles.levelPillText}>Lv. {level}</Text>
-                  </LinearGradient>
-                  <LinearGradient colors={['#B312B9', '#441AD1']} style={styles.starPill}>
-                    <Ionicons name="star" size={13} color="#FFE645" />
-                    <Text style={styles.starPillText}>Super Star</Text>
-                  </LinearGradient>
-                </View>
+                <ProfileIdentityBadges vipType={user.vipType} level={level} nickname={user.nickname} />
+                <TouchableOpacity
+                  style={styles.nicknameRequestButton}
+                  onPress={() => router.push('/main/edit-profile?focus=nickname')}
+                >
+                  <Ionicons name="create-outline" size={13} color="#F5E8FF" />
+                  <Text style={styles.nicknameRequestText}>Request Nickname</Text>
+                </TouchableOpacity>
                 <Text style={styles.meta} numberOfLines={1}>
                   ID: {user.displayId || '...'}  •  {user.country || 'Global'}
                 </Text>
@@ -254,7 +287,7 @@ export default function ProfileScreen() {
                     />
                   </View>
                   <Text style={styles.xpText}>
-                    {Math.max(0, totalExp - levelFloor)} / {expMultiplier} XP
+                    {wealth.nextLevel ? `${formatNumber(wealth.remaining)} gift diamonds to Lv.${wealth.nextLevel}` : 'Maximum wealth level'}
                   </Text>
                   <Text style={styles.encouragement}>Keep going! You’re doing great 💪</Text>
                 </View>
@@ -278,6 +311,11 @@ export default function ProfileScreen() {
                     onPress={() => router.push(item.route)}
                   >
                     <Image source={item.icon} style={styles.menuIcon} />
+                    {!!item.badge && (
+                      <View style={styles.menuBadge}>
+                        <Text style={styles.menuBadgeText}>{item.badge > 99 ? '99+' : item.badge}</Text>
+                      </View>
+                    )}
                     <Text style={styles.menuText} numberOfLines={2}>{item.label}</Text>
                   </TouchableOpacity>
                 ))}
@@ -307,9 +345,13 @@ const styles = StyleSheet.create({
   avatarFrame: { position: 'absolute', width: 137, height: 137, resizeMode: 'contain' },
   onlineDot: { position: 'absolute', right: 12, bottom: 14, width: 19, height: 19, borderRadius: 10, backgroundColor: '#18D26E', borderWidth: 2, borderColor: '#FFFFFF' },
   identity: { flex: 1, minWidth: 0, paddingLeft: 7 },
+  nicknameBadge: { alignSelf: 'flex-start', marginTop: 3, paddingHorizontal: 10, paddingVertical: 3, borderRadius: 10, borderWidth: 1, borderColor: '#8B5CF6', backgroundColor: 'rgba(76,29,149,.45)' },
+  nicknameBadgeText: { color: '#E9D5FF', fontSize: 11, fontWeight: '800' },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   userName: { color: '#FFFFFF', fontSize: 22, fontWeight: '900', maxWidth: '80%' },
   verified: { width: 25, height: 25, resizeMode: 'contain' },
+  nicknameRequestButton: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4, paddingHorizontal: 8, height: 24, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(224,175,255,.72)', backgroundColor: 'rgba(94,36,157,.65)' },
+  nicknameRequestText: { color: '#F5E8FF', fontSize: 9.5, fontWeight: '800' },
   badgeRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 },
   levelPill: { height: 25, borderRadius: 13, paddingHorizontal: 9, flexDirection: 'row', alignItems: 'center', gap: 4 },
   levelPillText: { color: '#2E145F', fontSize: 11, fontWeight: '900' },
@@ -350,10 +392,12 @@ const styles = StyleSheet.create({
   rewardText: { color: '#E9E3F8', fontSize: 9.5, textAlign: 'center', marginTop: 7 },
   menuCard: { height: 166 },
   menuGrid: { flex: 1, flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 5, paddingVertical: 4 },
-  menuItem: { width: '25%', height: '50%', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3 },
+  menuItem: { width: '25%', height: '50%', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3, position: 'relative' },
   menuRightBorder: { borderRightWidth: 1, borderRightColor: 'rgba(175,143,232,.20)' },
   menuBottomBorder: { borderBottomWidth: 1, borderBottomColor: 'rgba(175,143,232,.16)' },
   menuIcon: { width: 47, height: 47, resizeMode: 'contain' },
+  menuBadge: { position: 'absolute', top: 5, right: 8, minWidth: 20, height: 20, borderRadius: 10, paddingHorizontal: 5, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F43F5E', borderWidth: 1.5, borderColor: '#FFFFFF' },
+  menuBadgeText: { color: '#FFFFFF', fontSize: 10, fontWeight: '900' },
   menuText: { color: '#FFFFFF', fontSize: 10.5, lineHeight: 13, textAlign: 'center', marginTop: 1 },
   bottomSpace: { height: 120 },
 });
