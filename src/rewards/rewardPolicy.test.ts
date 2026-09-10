@@ -20,6 +20,15 @@ const dhakaMinuteMigrationPath = path.join(
   process.cwd(),
   'supabase/migrations/20260825231000_dhaka_video_minute_windows.sql',
 );
+const manualClaimMigrationPath = path.join(
+  process.cwd(),
+  'supabase/migrations/20260906230000_manual_video_live_reward_claim.sql',
+);
+const taskCenterReleaseMigrationPath = path.join(
+  process.cwd(),
+  'supabase/migrations/20260910230000_task_center_video_reward_and_1_1_40_release.sql',
+);
+const taskCenterPath = path.join(process.cwd(), 'app/main/tasks.js');
 
 test('task center excludes audio and legacy host live-duration rewards', () => {
   assert.equal(isAudioLiveRewardTask({ action: 'audio_live' }), true);
@@ -81,4 +90,35 @@ test('host period minutes use Dhaka video-day slices instead of stream start dat
   assert.match(sql, /SELECT SUM\(video_minutes\) FROM video_day_minutes/i);
   assert.match(sql, /video_minutes >= 35/i);
   assert.doesNotMatch(sql, /SUM\(session_row\.minutes\) FILTER/i);
+});
+
+test('daily video reward records cumulative time and pays only through a locked manual claim', () => {
+  const sql = fs.readFileSync(manualClaimMigrationPath, 'utf8');
+  const heartbeatBody = sql.slice(
+    sql.indexOf('CREATE OR REPLACE FUNCTION public.live_stream_heartbeat'),
+    sql.indexOf('-- Read-only status for the Host Dashboard.'),
+  );
+  assert.match(heartbeatBody, /eligible_seconds = public\.host_daily_live_rewards\.eligible_seconds \+ EXCLUDED\.eligible_seconds/i);
+  assert.match(heartbeatBody, /rewarded_now', FALSE/i);
+  assert.doesNotMatch(heartbeatBody, /grant_reward/i);
+  assert.match(sql, /CREATE OR REPLACE FUNCTION public\.claim_host_live_reward/i);
+  assert.match(sql, /FOR UPDATE/i);
+  assert.match(sql, /v_row\.rewarded_at IS NOT NULL/i);
+  assert.match(sql, /public\.grant_reward/i);
+});
+
+test('Task Center exposes the authoritative video reward status and manual claim', () => {
+  const source = fs.readFileSync(taskCenterPath, 'utf8');
+  assert.match(source, /get_host_live_reward_status/);
+  assert.match(source, /claim_host_live_reward/);
+  assert.match(source, /videoRewardClaimable/);
+  assert.doesNotMatch(source, /Automatically credited once per Dhaka day/i);
+});
+
+test('1.1.40 release fixes the threshold at one hour and forces updater-capable APKs forward', () => {
+  const sql = fs.readFileSync(taskCenterReleaseMigrationPath, 'utf8');
+  assert.match(sql, /3600::BIGINT/i);
+  assert.match(sql, /'latest_app_version', '"1\.1\.40"'/i);
+  assert.match(sql, /'min_supported_app_version', '"1\.1\.40"'/i);
+  assert.match(sql, /Popular-Live-v1\.1\.40-production\.apk/i);
 });

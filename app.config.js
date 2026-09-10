@@ -22,7 +22,7 @@ module.exports = () => ({
   expo: {
     name:                TENANT_CONFIG.appName,
     slug:                TENANT_CONFIG.slug,
-    version:             '1.1.39',
+    version:             '1.1.40',
     orientation:         'portrait',
     icon:                './assets/app-icon.png',
     userInterfaceStyle:  'dark',

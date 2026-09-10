@@ -1,13 +1,14 @@
-import React, { useMemo, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import React, { useCallback, useMemo, useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useGlobalState } from '../../src/context/GlobalStateContext';
 import { showCuteAlert } from '../../src/components/CuteAlert';
 import { horizontalScale } from '../../src/theme/scaling';
 import { isTaskCenterRewardEligible } from '../../src/rewards/rewardPolicy';
+import { supabase } from '../../src/api/supabase';
 
 /**
  * Task Center — fully wired to the migration 70 backend.
@@ -26,6 +27,7 @@ import { isTaskCenterRewardEligible } from '../../src/rewards/rewardPolicy';
 export default function TasksScreen() {
   const router = useRouter();
   const {
+    user,
     role,
     tasks: dbTasks,
     dailyLoginRewards,
@@ -33,10 +35,61 @@ export default function TasksScreen() {
     todayProgress,
     claimDailyLogin,
     claimTaskReward,
+    fetchProfile,
   } = useGlobalState();
 
   const isHost = role === 'host' || role === 'agency_owner';
   const [busy, setBusy] = useState(false);
+  const [videoReward, setVideoReward] = useState(null);
+  const [videoRewardLoading, setVideoRewardLoading] = useState(false);
+  const [videoRewardClaiming, setVideoRewardClaiming] = useState(false);
+
+  const loadVideoReward = useCallback(async () => {
+    if (!isHost || !user?.id) return;
+    setVideoRewardLoading(true);
+    try {
+      const { data, error } = await supabase.rpc('get_host_live_reward_status');
+      if (error || !data?.success) {
+        setVideoReward((current) => current || {
+          eligible_seconds: 0,
+          required_seconds: 3600,
+          reward_beans: 5000,
+          claimed: false,
+          claimable: false,
+        });
+        return;
+      }
+      setVideoReward(data);
+    } finally {
+      setVideoRewardLoading(false);
+    }
+  }, [isHost, user?.id]);
+
+  useFocusEffect(useCallback(() => {
+    loadVideoReward();
+    const refreshTimer = setInterval(loadVideoReward, 30_000);
+    return () => clearInterval(refreshTimer);
+  }, [loadVideoReward]));
+
+  const handleClaimVideoReward = async () => {
+    if (videoRewardClaiming || !videoReward?.claimable) return;
+    setVideoRewardClaiming(true);
+    try {
+      const { data, error } = await supabase.rpc('claim_host_live_reward');
+      if (error || !data?.success) {
+        showCuteAlert('Couldn\'t claim', data?.message || error?.message || 'Try again in a moment.');
+        return;
+      }
+      showCuteAlert(
+        'Reward claimed!',
+        `${Number(data.reward_beans || 0).toLocaleString()} beans were added to your wallet.`,
+      );
+      await fetchProfile?.(user.id);
+    } finally {
+      await loadVideoReward();
+      setVideoRewardClaiming(false);
+    }
+  };
 
   // Derive the calendar — today's day_index follows the streak rules.
   // We mirror the SQL logic so the UI doesn't need a round-trip just
@@ -87,7 +140,7 @@ export default function TasksScreen() {
   // Visible missions: viewer rows for everyone; host rows only for hosts.
   const visibleMissions = useMemo(() => {
     const all = Array.isArray(dbTasks) ? dbTasks : [];
-    // The daily video reward is automatic and server-authoritative. Legacy
+    // The daily video reward has its own server-authoritative claim card. Legacy
     // host-live/audio rows must never expose a second claim path.
     const eligible = all.filter(isTaskCenterRewardEligible);
     const viewerOnly = eligible.filter((t) => t.audience !== 'host');
@@ -134,6 +187,15 @@ export default function TasksScreen() {
     if (action === 'live') router.push('/main/(tabs)/live');
     else router.push('/main/(tabs)/');
   };
+
+  const requiredVideoSeconds = Math.max(60, Number(videoReward?.required_seconds || 3600));
+  const eligibleVideoSeconds = Math.max(0, Number(videoReward?.eligible_seconds || 0));
+  const requiredVideoMinutes = Math.ceil(requiredVideoSeconds / 60);
+  const eligibleVideoMinutes = Math.min(requiredVideoMinutes, Math.floor(eligibleVideoSeconds / 60));
+  const videoRewardPercent = Math.min(100, Math.round((eligibleVideoSeconds / requiredVideoSeconds) * 100));
+  const videoRewardBeans = Number(videoReward?.reward_beans || 5000);
+  const videoRewardClaimed = videoReward?.claimed === true;
+  const videoRewardClaimable = videoReward?.claimable === true;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -196,11 +258,57 @@ export default function TasksScreen() {
 
         {isHost && (
           <View style={styles.videoRewardPolicyCard}>
-            <Ionicons name="videocam" size={22} color="#38BDF8" />
+            <View style={styles.videoRewardIcon}>
+              <Ionicons name="videocam" size={22} color="#38BDF8" />
+            </View>
             <View style={styles.videoRewardPolicyCopy}>
               <Text style={styles.videoRewardPolicyTitle}>Daily Video Live Reward</Text>
               <Text style={styles.videoRewardPolicyText}>
-                Automatically credited once per Dhaka day after 60 uninterrupted minutes of video live. Audio live earns no time reward.
+                {videoRewardClaimed
+                  ? 'Reward claimed for today'
+                  : `${eligibleVideoMinutes} / ${requiredVideoMinutes} video minutes today`}
+              </Text>
+              <View style={styles.videoRewardProgressTrack}>
+                <View
+                  style={[
+                    styles.videoRewardProgressFill,
+                    { width: `${videoRewardPercent}%` },
+                    videoRewardClaimed && styles.videoRewardProgressClaimed,
+                  ]}
+                />
+              </View>
+              <View style={styles.videoRewardFooter}>
+                <View style={styles.videoRewardAmount}>
+                  <Ionicons name="leaf" size={14} color="#FBBF24" />
+                  <Text style={styles.videoRewardAmountText}>+{videoRewardBeans.toLocaleString()} beans</Text>
+                </View>
+                {videoRewardClaimed ? (
+                  <View style={styles.videoRewardClaimedButton}>
+                    <Ionicons name="checkmark" size={16} color="#FFFFFF" />
+                    <Text style={styles.videoRewardClaimButtonText}>Claimed</Text>
+                  </View>
+                ) : (
+                  <TouchableOpacity
+                    style={[
+                      styles.videoRewardClaimButton,
+                      (!videoRewardClaimable || videoRewardLoading) && styles.videoRewardClaimButtonDisabled,
+                    ]}
+                    onPress={handleClaimVideoReward}
+                    disabled={!videoRewardClaimable || videoRewardLoading || videoRewardClaiming}
+                  >
+                    {videoRewardClaiming || videoRewardLoading ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <>
+                        <Ionicons name={videoRewardClaimable ? 'gift' : 'lock-closed'} size={15} color="#FFFFFF" />
+                        <Text style={styles.videoRewardClaimButtonText}>Claim</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                )}
+              </View>
+              <Text style={styles.videoRewardHint}>
+                Video time adds up across today&apos;s sessions. One claim per Bangladesh day; audio live does not count.
               </Text>
             </View>
           </View>
@@ -309,9 +417,21 @@ const styles = StyleSheet.create({
   sectionTitle: { color: '#FFFFFF', fontSize: 18, fontWeight: 'bold', marginBottom: 16 },
   mutedNote: { color: '#6B7280', fontSize: 12, fontStyle: 'italic', marginBottom: 12 },
   videoRewardPolicyCard: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: 'rgba(56, 189, 248, 0.10)', borderWidth: 1, borderColor: 'rgba(56, 189, 248, 0.35)', borderRadius: 12, padding: 14, marginBottom: 14 },
+  videoRewardIcon: { width: 36, height: 36, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(56, 189, 248, 0.14)' },
   videoRewardPolicyCopy: { flex: 1, marginLeft: 10 },
   videoRewardPolicyTitle: { color: '#FFFFFF', fontSize: 14, fontWeight: '700', marginBottom: 4 },
   videoRewardPolicyText: { color: '#BAE6FD', fontSize: 12, lineHeight: 17 },
+  videoRewardProgressTrack: { height: 6, backgroundColor: 'rgba(255,255,255,0.10)', borderRadius: 3, marginTop: 10, overflow: 'hidden' },
+  videoRewardProgressFill: { height: '100%', backgroundColor: '#38BDF8', borderRadius: 3 },
+  videoRewardProgressClaimed: { backgroundColor: '#34D399' },
+  videoRewardFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 },
+  videoRewardAmount: { flexDirection: 'row', alignItems: 'center', marginRight: 10 },
+  videoRewardAmountText: { color: '#FBBF24', fontSize: 12, fontWeight: '700', marginLeft: 5 },
+  videoRewardClaimButton: { minWidth: 86, height: 34, paddingHorizontal: 14, borderRadius: 17, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#F59E0B', gap: 5 },
+  videoRewardClaimButtonDisabled: { backgroundColor: '#4B5563', opacity: 0.75 },
+  videoRewardClaimedButton: { minWidth: 96, height: 34, paddingHorizontal: 13, borderRadius: 17, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#34D399', gap: 5 },
+  videoRewardClaimButtonText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
+  videoRewardHint: { color: '#7DD3FC', fontSize: 10, lineHeight: 15, marginTop: 10 },
 
   missionCard: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#1E1A34', padding: 16, borderRadius: 12, marginBottom: 12 },
   missionInfo: { flex: 1, marginRight: 12 },
