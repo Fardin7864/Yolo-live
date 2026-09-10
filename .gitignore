@@ -47,3 +47,4 @@ yarn-error.*
 /releases/*.apk
 /tmp/
 /supabase/.temp/
+/play-store/artifacts/

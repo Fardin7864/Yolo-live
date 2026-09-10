@@ -18,20 +18,21 @@ export default function PrivacyScreen() {
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
-        <Text style={styles.lastUpdated}>Last Updated: October 2026</Text>
+        <Text style={styles.lastUpdated}>Last Updated: September 10, 2026</Text>
 
         <Text style={styles.sectionTitle}>1. Information We Collect</Text>
         <Text style={styles.paragraph}>
           We collect information to provide better services to our users. This includes:
         </Text>
         <Text style={styles.bullet}>• Account Information (Name, Phone number, Email, Avatar).</Text>
-        <Text style={styles.bullet}>• Content Information (Live streams, Chat messages).</Text>
-        <Text style={styles.bullet}>• Device Information (IP address, OS version, Device model).</Text>
+        <Text style={styles.bullet}>• Content Information (Live streams, audio, photos, and chat messages).</Text>
+        <Text style={styles.bullet}>• Device Information (IP address, device identifier, OS version, device model, and diagnostics).</Text>
+        <Text style={styles.bullet}>• Location Information when you use regional or nearby features.</Text>
         <Text style={styles.bullet}>• Wallet & Transaction Data (Diamond top-ups, Bean withdrawals).</Text>
 
         <Text style={styles.sectionTitle}>2. How We Use Your Information</Text>
         <Text style={styles.paragraph}>
-          We use the information we collect to operate, maintain, and improve Popular Live. Specifically, we use it to authenticate you, process your virtual transactions, monitor safety, and prevent fraudulent activities.
+          We use the information we collect to operate, maintain, secure, and improve Popular Live. This includes authentication, live audio and video delivery, messaging, regional features, virtual transactions, customer support, safety monitoring, diagnostics, and fraud prevention.
         </Text>
 
         <Text style={styles.sectionTitle}>3. Data Protection</Text>
@@ -41,12 +42,22 @@ export default function PrivacyScreen() {
 
         <Text style={styles.sectionTitle}>4. Data Sharing</Text>
         <Text style={styles.paragraph}>
-          We do not sell your personal information to third parties. We may share information with trusted third-party service providers (such as Supabase for database integration) solely to facilitate our Services, subject to rigorous data processing agreements.
+          We do not sell your personal information. We use service providers, including Supabase for authentication, storage, and database services, Agora for live audio and video delivery, and Google for optional sign-in. They process data only as needed to provide their services and are subject to their own privacy and security obligations.
         </Text>
 
         <Text style={styles.sectionTitle}>5. Your Privacy Rights</Text>
         <Text style={styles.paragraph}>
-          You have the right to request the deletion of your account and associated data. You can perform this action via the "Delete Account" button in the Settings page. Upon clicking, all your personal data will be wiped from our secure servers.
+          You can delete your account through Settings → Delete Account or contact carelive785@gmail.com. Deletion removes or anonymizes profile information and disables the account. Limited transaction, gift, game, safety, and fraud-prevention records may be retained where required for legal, accounting, security, or dispute-resolution purposes.
+        </Text>
+
+        <Text style={styles.sectionTitle}>6. Retention and Security</Text>
+        <Text style={styles.paragraph}>
+          We retain information only while it is needed for the purposes described above, then delete or anonymize it. We use encrypted network connections, access controls, and monitoring to protect information, but no internet service can guarantee absolute security.
+        </Text>
+
+        <Text style={styles.sectionTitle}>7. Contact</Text>
+        <Text style={styles.paragraph}>
+          For privacy questions or deletion requests, contact the Popular Live team at carelive785@gmail.com.
         </Text>
         
         <View style={{ height: 40 }} />

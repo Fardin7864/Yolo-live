@@ -1,0 +1,6 @@
+Initial Google Play release of Popular Live 1.1.39.
+
+• Live video and audio rooms
+• Real-time chat and virtual gifts
+• Improved room privacy for newly joined viewers
+• Reliability improvements for social mini-games

@@ -12,6 +12,8 @@
  */
 const { TENANT_CONFIG } = require('./tenant.config');
 
+const isPlayStoreBuild = process.env.APP_DISTRIBUTION === 'play-store';
+
 // Helper: substitute %appName% in permission strings so we don't
 // hardcode the brand name three times in tenant.config.js.
 const fill = (str) => String(str || '').replace(/%appName%/g, TENANT_CONFIG.appName);
@@ -49,8 +51,11 @@ module.exports = () => ({
         'READ_MEDIA_VIDEO',
         'READ_MEDIA_AUDIO',
         'READ_MEDIA_VISUAL_USER_SELECTED',
-        'REQUEST_INSTALL_PACKAGES',
+        ...(!isPlayStoreBuild ? ['REQUEST_INSTALL_PACKAGES'] : []),
       ],
+      blockedPermissions: isPlayStoreBuild
+        ? ['android.permission.REQUEST_INSTALL_PACKAGES']
+        : [],
       package: TENANT_CONFIG.bundleId,
     },
     web: {
@@ -90,6 +95,7 @@ module.exports = () => ({
     ],
     extra: {
       router: {},
+      distributionChannel: isPlayStoreBuild ? 'play-store' : 'direct',
       eas: {
         projectId: TENANT_CONFIG.eas.projectId,
       },

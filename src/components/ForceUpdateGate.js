@@ -27,6 +27,9 @@ import { BRAND } from '../theme/brand';
 export default function ForceUpdateGate({ children }) {
   const { systemSettings } = useGlobalState();
 
+  const isPlayStoreBuild = Constants.expoConfig?.extra?.distributionChannel === 'play-store';
+  const playStoreUrl = 'https://play.google.com/store/apps/details?id=com.greenlive.app';
+
   const currentVersion = Constants.expoConfig?.version
     ?? Constants.manifest?.version
     ?? '0.0.0';
@@ -35,7 +38,9 @@ export default function ForceUpdateGate({ children }) {
   const latestVersion = String(systemSettings?.latest_app_version        || '').trim();
   const storeUrlAndroid = String(systemSettings?.store_url_android || '').trim();
   const storeUrlIos     = String(systemSettings?.store_url_ios     || '').trim();
-  const storeUrl = Platform.OS === 'ios' ? storeUrlIos : storeUrlAndroid;
+  const storeUrl = isPlayStoreBuild
+    ? playStoreUrl
+    : (Platform.OS === 'ios' ? storeUrlIos : storeUrlAndroid);
   const releaseNotes = String(systemSettings?.app_update_notes || '').trim();
   const [downloadError, setDownloadError] = useState('');
   const [downloading, setDownloading] = useState(false);
@@ -62,9 +67,9 @@ export default function ForceUpdateGate({ children }) {
     setDownloading(true);
     setDownloadProgress(0);
     try {
-      if (Platform.OS !== 'android') {
+      if (isPlayStoreBuild || Platform.OS !== 'android') {
         const opened = await Linking.openURL(storeUrl);
-        if (opened === false) throw new Error('No browser is available.');
+        if (opened === false) throw new Error('The update page could not be opened.');
         return;
       }
 
@@ -116,6 +121,7 @@ export default function ForceUpdateGate({ children }) {
           downloadProgress={downloadProgress}
           onUpdate={startUpdate}
           onLater={() => setShowOptional(false)}
+          isPlayStoreBuild={isPlayStoreBuild}
         />
       </>
     );
@@ -141,7 +147,7 @@ export default function ForceUpdateGate({ children }) {
           {downloading && <DownloadProgress progress={downloadProgress} />}
           <TouchableOpacity style={[s.btn, downloading && s.btnDisabled]} onPress={startUpdate} disabled={downloading}>
             <Ionicons name={downloading ? 'hourglass-outline' : 'cloud-download-outline'} size={18} color="#FFF" />
-            <Text style={s.btnText}>{downloading ? 'Downloading update…' : 'Download update'}</Text>
+            <Text style={s.btnText}>{downloading ? 'Downloading update…' : (isPlayStoreBuild ? 'Open Play Store' : 'Download update')}</Text>
           </TouchableOpacity>
         </>
       ) : (
@@ -152,7 +158,7 @@ export default function ForceUpdateGate({ children }) {
   );
 }
 
-function UpdateModal({ visible, required, currentVersion, latestVersion, releaseNotes, error, downloading, downloadProgress, onUpdate, onLater }) {
+function UpdateModal({ visible, required, currentVersion, latestVersion, releaseNotes, error, downloading, downloadProgress, onUpdate, onLater, isPlayStoreBuild }) {
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={required ? undefined : onLater}>
       <View style={s.modalBackdrop}>
@@ -166,7 +172,7 @@ function UpdateModal({ visible, required, currentVersion, latestVersion, release
           {downloading && <DownloadProgress progress={downloadProgress} />}
           <TouchableOpacity style={[s.btn, downloading && s.btnDisabled]} onPress={onUpdate} disabled={downloading}>
             <Ionicons name={downloading ? 'hourglass-outline' : 'cloud-download-outline'} size={18} color="#FFF" />
-            <Text style={s.btnText}>{downloading ? 'Downloading update…' : 'Download update'}</Text>
+            <Text style={s.btnText}>{downloading ? 'Downloading update…' : (isPlayStoreBuild ? 'Open Play Store' : 'Download update')}</Text>
           </TouchableOpacity>
           {!required && !downloading && <TouchableOpacity style={s.laterBtn} onPress={onLater}><Text style={s.laterText}>Later</Text></TouchableOpacity>}
         </View>
