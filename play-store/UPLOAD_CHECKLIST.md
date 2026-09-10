@@ -2,7 +2,7 @@
 
 ## Prepared Files
 
-- Signed bundle: `artifacts/Popular-Live-1.1.39-42.aab`
+- Signed bundle: `artifacts/Popular-Live-1.1.40-43.aab`
 - Store icon: `listing/assets/app-icon-512.png`
 - Feature graphic: `listing/assets/feature-graphic-1024x500.png`
 - English title, short description, full description, and release notes: `listing/en-US/`
@@ -12,8 +12,8 @@
 
 - App name: Popular Live
 - Package name: `com.greenlive.app`
-- Version name: `1.1.39`
-- Version code: `42`
+- Version name: `1.1.40`
+- Version code: `43`
 - Category: Social
 - Contact email: `carelive785@gmail.com`
 - Privacy policy: `https://fardin7864.github.io/Yolo-live/privacy-policy.html`
