@@ -14,6 +14,7 @@
 
 import { RtcTokenBuilder, RtcRole } from 'npm:agora-token@2.0.5';
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { appServerConnected, serverDisconnectedResponse } from '../_shared/app-server.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -39,8 +40,14 @@ Deno.serve(async (req) => {
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
     const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? Deno.env.get('SUPABASE_PUBLISHABLE_KEY');
-    if (!supabaseUrl || !supabaseAnonKey) {
+    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? Deno.env.get('SUPABASE_SECRET_KEY');
+    if (!supabaseUrl || !supabaseAnonKey || !serviceRoleKey) {
       return json({ error: 'Supabase auth credentials not configured' }, 500);
+    }
+
+    const service = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
+    if (!await appServerConnected(service)) {
+      return serverDisconnectedResponse(corsHeaders);
     }
 
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {

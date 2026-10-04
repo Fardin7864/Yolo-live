@@ -10,7 +10,7 @@ import { CrashEngine } from './engine.js';
 import { OutboxPublisher } from './outbox.js';
 import { registry } from './metrics.js';
 import { RateLimiter } from './rateLimit.js';
-import { rpc, serviceDb } from './database.js';
+import { isAppServerConnected, rpc, serviceDb } from './database.js';
 
 const log = pino({ level: config.LOG_LEVEL, base: { service: 'crash-server', instanceId } });
 let redisPub: RedisClientType | undefined;
@@ -23,6 +23,7 @@ async function readiness() {
     return { ready: false, reason: 'redis_unavailable' };
   }
   try {
+    if (!await isAppServerConnected()) return { ready: false, reason: 'server_disconnected' };
     const database = await rpc<Record<string, unknown>>(serviceDb, 'crash_service_readiness', {
       p_game_id: config.CRASH_GAME_ID,
       p_table_id: config.CRASH_TABLE_ID,

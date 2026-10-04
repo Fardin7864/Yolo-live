@@ -14,6 +14,7 @@
 // =====================================================================
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { appServerConnected, serverDisconnectedResponse } from '../_shared/app-server.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -36,6 +37,10 @@ Deno.serve(async (req) => {
     const supabase = createClient(supabaseUrl, serviceRoleKey, {
       auth: { persistSession: false },
     });
+
+    if (!await appServerConnected(supabase)) {
+      return serverDisconnectedResponse(corsHeaders);
+    }
 
     const { data, error } = await supabase.rpc('tin_patti_pro_tick');
     if (error) {

@@ -1,4 +1,5 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { appServerConnected, serverDisconnectedResponse } from '../_shared/app-server.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -25,6 +26,10 @@ Deno.serve(async (req) => {
     const deviceHash = await sha256(`${pepper}:device:${rawDeviceId}`);
     const installationHash = await sha256(`${pepper}:install:${rawInstallationId}`);
     const service = createClient(url, serviceKey, { auth: { persistSession: false } });
+
+    if (!await appServerConnected(service)) {
+      return serverDisconnectedResponse(corsHeaders);
+    }
 
     let userId: string | null = null;
     const authHeader = req.headers.get('Authorization');

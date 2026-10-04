@@ -25,3 +25,13 @@ export async function authenticate(accessToken: string) {
   const db = userDb(accessToken); const { data, error } = await db.auth.getUser(accessToken);
   if (error || !data.user) throw new Error('UNAUTHORIZED'); return { user: data.user, db };
 }
+
+export async function isAppServerConnected(): Promise<boolean> {
+  const { data, error } = await serviceDb
+    .from('system_settings')
+    .select('value')
+    .eq('key', 'app_server_connected')
+    .maybeSingle();
+  if (error) throw error;
+  return data?.value !== false;
+}
