@@ -13,7 +13,7 @@
  *   `#D946EF`. Replace those with BRAND.primary / BRAND.primaryAlt
  *   when you touch the surrounding code — see SAAS_ONBOARDING.md
  *   "Brand depth" for the recommended progression. Untouched legacy
- *   colours still work; they're just off-palette for Popular Live.
+ *   colours still work; they're just off-palette for Feel Live.
  */
 import { TENANT_CONFIG } from '../../tenant.config';
 

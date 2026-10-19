@@ -134,7 +134,7 @@ export default function ForceUpdateGate({ children }) {
       </View>
       <Text style={s.title}>Update required</Text>
       <Text style={s.body}>
-        A newer version of Popular Live is available with security and
+        A newer version of Feel Live is available with security and
         stability fixes. Please update to continue using the app.
       </Text>
       {!!releaseNotes && <Text style={s.notes}>{releaseNotes}</Text>}
@@ -164,7 +164,7 @@ function UpdateModal({ visible, required, currentVersion, latestVersion, release
       <View style={s.modalBackdrop}>
         <View style={s.modalCard}>
           <View style={s.modalIcon}><Ionicons name="cloud-download" size={32} color="#FFF" /></View>
-          <Text style={s.modalTitle}>Popular Live update available</Text>
+          <Text style={s.modalTitle}>Feel Live update available</Text>
           <Text style={s.modalBody}>Version {latestVersion} is ready. Download it now to update your existing app.</Text>
           {!!releaseNotes && <Text style={s.modalNotes}>{releaseNotes}</Text>}
           <Text style={s.modalVersion}>Installed: {currentVersion}  •  New: {latestVersion}</Text>

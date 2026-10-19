@@ -288,7 +288,7 @@ export default function LiveSetupScreen() {
   const handleShare = async () => {
     try {
       await Share.share({
-        message: `Join my awesome ${broadcastType} on Popular Live! Download the app now.`,
+        message: `Join my awesome ${broadcastType} on Feel Live! Download the app now.`,
       });
     } catch (error) {
       showCuteAlert("Error", error.message);

@@ -172,9 +172,9 @@ const GamesBottomSheet = React.memo(function GamesBottomSheet({
                       style={styles.gameTileGrad}
                     >
                       <View style={styles.gameTileIconWrap}>
-                        <Image source={require('../../assets/games/greedy-lion/icon.webp')} style={styles.gameTileIconImage} />
+                        <Image source={require('../../assets/games/greedy-lion/background.webp')} style={styles.gameTileIconImage} />
                       </View>
-                      <Text style={styles.gameTileName} numberOfLines={2}>Populer Greedy</Text>
+                      <Text style={styles.gameTileName} numberOfLines={2}>Feel Greddy</Text>
                     </LinearGradient>
                   </TouchableOpacity>
                 )}
@@ -183,7 +183,7 @@ const GamesBottomSheet = React.memo(function GamesBottomSheet({
                   <TouchableOpacity style={styles.gameTile} activeOpacity={0.85} onPress={openGreedyPro}>
                     <LinearGradient colors={['rgba(255,216,61,0.28)', 'rgba(213,17,58,0.22)']} style={styles.gameTileGrad}>
                       <View style={styles.gameTileIconWrap}>
-                        <Image source={require('../../assets/games/greedy-pro/icon.webp')} style={styles.gameTileIconImage} />
+                        <Image source={require('../../assets/games/greedy-lion/wheel.webp')} style={styles.gameTileIconImage} />
                       </View>
                       <Text style={styles.gameTileName} numberOfLines={2}>Greedy King</Text>
                     </LinearGradient>
@@ -201,20 +201,9 @@ const GamesBottomSheet = React.memo(function GamesBottomSheet({
                       style={styles.gameTileGrad}
                     >
                       <View style={styles.gameTileIconWrap}>
-                        <Image source={require('../../assets/games/tin-patti-pro/icon.webp')} style={styles.gameTileIconImage} />
+                        <Image source={require('../../assets/games/tin-patti-pro/background_poster.png')} style={styles.gameTileIconImage} />
                       </View>
                       <Text style={styles.gameTileName} numberOfLines={2}>Tin Patti Pro</Text>
-                    </LinearGradient>
-                  </TouchableOpacity>
-                )}
-
-                {luckyDiceActive && (
-                  <TouchableOpacity style={styles.gameTile} activeOpacity={0.85} onPress={openLuckyDice}>
-                    <LinearGradient colors={['rgba(224,179,78,0.24)', 'rgba(11,91,58,0.22)']} style={styles.gameTileGrad}>
-                      <View style={styles.gameTileIconWrap}>
-                        <Image source={require('../../assets/games/lucky-dice/icon.webp')} style={styles.gameTileIconImage} />
-                      </View>
-                      <Text style={styles.gameTileName} numberOfLines={2}>Lucky Dice Royale</Text>
                     </LinearGradient>
                   </TouchableOpacity>
                 )}
@@ -223,14 +212,14 @@ const GamesBottomSheet = React.memo(function GamesBottomSheet({
                   <TouchableOpacity style={styles.gameTile} activeOpacity={0.85} onPress={openCrash}>
                     <LinearGradient colors={['rgba(89,66,214,0.32)', 'rgba(226,82,114,0.20)']} style={styles.gameTileGrad}>
                       <View style={styles.gameTileIconWrap}>
-                        <Image source={require('../../assets/games/crash/icon.webp')} style={styles.gameTileIconImage} />
+                        <Image source={require('../../games/crash/assets/background.webp')} style={styles.gameTileIconImage} />
                       </View>
                       <Text style={styles.gameTileName} numberOfLines={2}>Crash</Text>
                     </LinearGradient>
                   </TouchableOpacity>
                 )}
 
-                {!greedyLionActive && !greedyProActive && !tinPattiProActive && !luckyDiceActive && !crashActive && (
+                {!greedyLionActive && !greedyProActive && !tinPattiProActive && !crashActive && (
                   <View style={styles.gameTileEmpty}>
                     <Ionicons name="game-controller-outline" size={44} color="rgba(255,255,255,0.2)" />
                     <Text style={styles.gameTileEmptyText}>
@@ -243,7 +232,7 @@ const GamesBottomSheet = React.memo(function GamesBottomSheet({
           )}
 
           {gameMenuState === 'greedylion' && (
-            <ErrorBoundary name="Populer Greedy WebView">
+            <ErrorBoundary name="Feel Greddy WebView">
               <View style={styles.liveGameCanvas}>
                 <GameWebView gameId="greedy_lion" onExit={backToMenu} onGameWin={onGameWin} fillContainer />
                 <TouchableOpacity

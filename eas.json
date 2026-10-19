@@ -28,6 +28,10 @@
       },
       "channel": "production",
       "autoIncrement": true
+    },
+    "plive": {
+      "extends": "preview",
+      "channel": "plive"
     }
   },
   "submit": {

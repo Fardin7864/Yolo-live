@@ -8,7 +8,7 @@ export interface RegisteredGame {
 }
 
 export const REGISTERED_GAMES: Record<GameId, RegisteredGame> = {
-  greedy_lion: { id: 'greedy_lion', title: 'Populer Greedy', route: '/main/game/greedy_lion' },
+  greedy_lion: { id: 'greedy_lion', title: 'Feel Greddy', route: '/main/game/greedy_lion' },
   greedy_pro: { id: 'greedy_pro', title: 'Greedy King', route: '/main/game/greedy_pro' },
   tin_patti_pro: { id: 'tin_patti_pro', title: 'Teen Patti Pro', route: '/main/game/tin_patti_pro' },
   lucky_dice: { id: 'lucky_dice', title: 'Lucky Dice Royale', route: '/main/game/lucky_dice' },

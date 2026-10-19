@@ -54,11 +54,11 @@ const QUICK_ACTIONS = [
 const GAME_ITEMS = [
   {
     key: 'greedy_lion',
-    title: 'Populer Greedy',
+    title: 'Feel Greddy',
     subtitle: 'Pick up to 6 foods. Pizza or Salad wins.',
     icon: 'trophy',
     emoji: '🦁',
-    image: require('../../../assets/games/greedy-lion/icon.webp'),
+    image: require('../../../assets/games/greedy-lion/background.webp'),
     colors: ['#F59E0B', '#B91C9B', '#11115F'],
     chip: 'Native',
   },
@@ -68,7 +68,7 @@ const GAME_ITEMS = [
     subtitle: 'Spin the feast wheel in the new full-screen game.',
     icon: 'restaurant',
     emoji: '🍕',
-    image: require('../../../assets/games/greedy-pro/icon.webp'),
+    image: require('../../../assets/games/greedy-lion/wheel.webp'),
     colors: ['#FFD83D', '#D5113A', '#18AFCF'],
     chip: 'Global',
   },
@@ -78,18 +78,8 @@ const GAME_ITEMS = [
     subtitle: 'One shared pro card table.',
     icon: 'albums',
     emoji: 'TP',
-    image: require('../../../assets/games/tin-patti-pro/icon.webp'),
+    image: require('../../../assets/games/tin-patti-pro/background_poster.png'),
     colors: ['#F59E0B', '#0F8A5F', '#5C1BC6'],
-    chip: 'Global',
-  },
-  {
-    key: 'lucky_dice',
-    title: 'Lucky Dice Royale',
-    subtitle: 'Three royal dice. Multiple winning bets.',
-    icon: 'dice',
-    emoji: 'DICE',
-    image: require('../../../assets/games/lucky-dice/icon.webp'),
-    colors: ['#D3A43D', '#12633F', '#431832'],
     chip: 'Global',
   },
   {
@@ -98,7 +88,7 @@ const GAME_ITEMS = [
     subtitle: 'Ride the multiplier and cash out before it crashes.',
     icon: 'rocket',
     emoji: '🚀',
-    image: require('../../../assets/games/crash/icon.webp'),
+    image: require('../../../games/crash/assets/background.webp'),
     colors: ['#101B3D', '#5942D6', '#E25272'],
     chip: 'Live',
   },
@@ -146,7 +136,7 @@ function HomeHeader({ user, unreadCount, onProfile, onSearch, onNotifications })
         </View>
         <View style={styles.headerProfileCopy}>
           <View style={styles.headerNameRow}>
-            <Text style={styles.headerName} numberOfLines={1}>{user?.name || 'Popular Live User'}</Text>
+          <Text style={styles.headerName} numberOfLines={1}>{user?.name || 'Feel Live User'}</Text>
             <SvipNameTag vipType={user?.vipType} compact />
           </View>
           <Text style={styles.headerMeta} numberOfLines={1}>ID: {user?.displayId || '—'}  •  Lv.{Math.max(1, Number(user?.level) || 1)}</Text>
@@ -349,8 +339,10 @@ function HostProfileCard({ host, index, onPress, nearby = false, style }) {
           <Ionicons name="checkmark-circle" size={13} color="#8A63FF" />
         </View>
         <View style={styles.pointsRow}>
-          <Ionicons name="star" size={12} color="#FFD53D" />
-          <Text style={styles.pointsText}>{formatCount(host.points)}</Text>
+          <Ionicons name={host.live_minutes != null ? 'time' : 'star'} size={12} color="#FFD53D" />
+          <Text style={styles.pointsText}>
+            {host.live_minutes != null ? `${formatCount(host.live_minutes)} min live` : formatCount(host.points)}
+          </Text>
         </View>
       </View>
     </TouchableOpacity>
@@ -440,6 +432,7 @@ export default function PremiumHomeScreen() {
   const [liveStreams, setLiveStreams] = useState([]);
   const [hosts, setHosts] = useState([]);
   const [nearbyHosts, setNearbyHosts] = useState([]);
+  const [minuteHosts, setMinuteHosts] = useState([]);
   const [hostHasMore, setHostHasMore] = useState(false);
   const [loadingMoreHosts, setLoadingMoreHosts] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -556,10 +549,22 @@ export default function PremiumHomeScreen() {
     setHosts((current) => reset ? nextHosts : [...current, ...nextHosts]);
   }, [user?.id]);
 
+  const fetchMinuteHosts = useCallback(async () => {
+    const { data, error } = await supabase.rpc('get_home_host_live_minutes', { p_limit: 20 });
+    if (error) {
+      setMinuteHosts([]);
+      return;
+    }
+    setMinuteHosts((data || []).map((host) => ({
+      ...host,
+      points: Number(host.live_minutes || 0),
+    })));
+  }, []);
+
   const fetchAll = useCallback(async () => {
     if (isGaming) return;
-    await fetchLiveStreams();
-  }, [fetchLiveStreams, isGaming]);
+    await Promise.all([fetchLiveStreams(), fetchMinuteHosts()]);
+  }, [fetchLiveStreams, fetchMinuteHosts, isGaming]);
 
   useEffect(() => {
     setLoading(true);
@@ -645,7 +650,7 @@ export default function PremiumHomeScreen() {
           </>
         ) : (
           <>
-            <SectionHeader asset={SECTION_ICONS.popular} title="Popular Live" onViewAll={() => router.push('/main/(tabs)/explore')} />
+            <SectionHeader asset={SECTION_ICONS.popular} title="Feel Live" onViewAll={() => router.push('/main/(tabs)/explore')} />
             {loading ? (
               <View style={styles.loader}><LogoLoader size="small" /></View>
             ) : liveStreams.length ? (
@@ -693,6 +698,24 @@ export default function PremiumHomeScreen() {
                 onPress={() => router.push('/main/(tabs)/live')}
               />
             )}
+            {minuteHosts.length ? (
+              <>
+                <SectionHeader asset={SECTION_ICONS.popular} title="Top Hosts by Live Minutes" onViewAll={() => router.push('/main/(tabs)/explore')} />
+                <TwoColumnGrid
+                  items={minuteHosts}
+                  style={styles.gridAfterCarousel}
+                  renderItem={(item, index) => (
+                    <HostProfileCard
+                      key={item.profile_id}
+                      host={{ ...item, id: item.profile_id }}
+                      index={index}
+                      onPress={() => router.push('/main/(tabs)/explore')}
+                      style={styles.gridCard}
+                    />
+                  )}
+                />
+              </>
+            ) : null}
           </>
         )}
       </ScrollView>

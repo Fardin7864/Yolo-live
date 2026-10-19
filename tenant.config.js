@@ -23,17 +23,17 @@ const TENANT_CONFIG = {
   // ============================================================
   // 1. IDENTITY — Play Store + OS-level
   // ============================================================
-  appName:   'Popular Live',               // Title under the launcher icon
-  shortName: 'Popular Live',               // Short version used in tight UI
-  bundleId:  'com.greenlive.app',          // Android applicationId / iOS bundle id — MUST be globally unique on the store
-  scheme:    'green-live',                 // Deep-link scheme (green-live://path)
-  slug:      'green-live',                 // Expo project slug — must match the linked EAS project. Display name comes from `appName`.
-  owner:     'yoloteam',                   // EAS organisation/team account
+  appName:   'Feel Live',                 // Title under the launcher icon
+  shortName: 'Feel Live',                 // Short version used in tight UI
+  bundleId:  'com.feellive.app',           // Android applicationId / iOS bundle id — MUST be globally unique on the store
+  scheme:    'feel-live',                  // Deep-link scheme (feel-live://path)
+  slug:      'feel-live',                  // Expo project slug — must match the linked EAS project. Display name comes from `appName`.
+  owner:     'fardin.hasan',                // EAS account for the Feel Live build
 
   // ============================================================
   // 2. BRANDING — colours + share-link text
   // ============================================================
-  // Existing product palette. Identity assets and display copy use Popular Live.
+  // Existing product palette. Identity assets and display copy use Feel Live.
   primaryColor:   '#36B911',               // Green — primary CTAs, brand anchor
   primaryAlt:     '#19D6DB',               // Cyan — gradient companion
   splashBg:       '#061226',               // Deep navy — splash / dark surfaces
@@ -61,8 +61,8 @@ const TENANT_CONFIG = {
   // 3. BACKEND — Supabase + EAS
   // ============================================================
   supabase: {
-    url:     'https://wahnvplqftkqtvtpwztq.supabase.co',
-    anonKey: 'sb_publishable_AziPqXs0b4ZRSe0PQNVThg_WU4yfyL0',
+    url:     'https://mcuabodoijqajpuwnjdu.supabase.co',
+    anonKey: 'sb_publishable_qtO2i-rzGbTohbUPRbfhWA_WXc5zQ1O',
   },
 
   // Google Sign-In uses the native Google account picker. The Web client ID
@@ -73,8 +73,8 @@ const TENANT_CONFIG = {
   },
 
   eas: {
-    projectId: '5eb8efa6-3b5d-4fb2-9ab0-5ec60e95ce25',
-    updateUrl: 'https://u.expo.dev/5eb8efa6-3b5d-4fb2-9ab0-5ec60e95ce25',
+    projectId: 'ded0aab3-067c-41a4-b816-4580f2edacf4',
+    updateUrl: 'https://u.expo.dev/ded0aab3-067c-41a4-b816-4580f2edacf4',
   },
 
   // ============================================================

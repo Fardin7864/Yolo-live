@@ -29,7 +29,7 @@ export const GlobalStateProvider = ({ children }) => {
     live_enabled: true,
     gifting_enabled: true,
     games_enabled: true,
-    platform_name: 'Popular Live',
+    platform_name: 'Feel Live',
   });
 
   // Per-game admin toggles (driven by `game_settings` table). Defaults
